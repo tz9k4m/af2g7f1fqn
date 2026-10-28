@@ -4,6 +4,9 @@ import { loadBook, classifyAll, gameKey, fmtEval, winPct } from './engine.js';
 import { loadGame, summarize, ORDER, PHASES, SKILLS } from './game.js';
 import { shortLine, deepExplain, CLASS_SV, BAD, describeMove } from './coach.js';
 import { Engine } from './sf.js';
+import { store, hash } from './store.js';
+import { recordGame, collectMistakes } from './stats.js';
+import { Trainer } from './train.js';
 
 const CLASS_STYLE = {
   brilliant: ['#26c2a3', '!!'], great: ['#749bbf', '!'], best: ['#81b64c', '★'], excellent: ['#81b64c', '✓'],
@@ -17,20 +20,11 @@ const MS_PER_POS = 250;
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const store = {
-  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
-  set(k, v) {
-    try { localStorage.setItem(k, JSON.stringify(v)); } catch {
-      // Fullt: släng gamla analyser och försök igen.
-      try { Object.keys(localStorage).filter(x => x.startsWith('pos:')).slice(0, 10).forEach(x => localStorage.removeItem(x)); localStorage.setItem(k, JSON.stringify(v)); } catch { /* ingen lagring */ }
-    }
-  },
-};
-const hash = s => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(16) + s.length; };
 const icon = cls => `<span class="icon" style="background:${CLASS_STYLE[cls][0]}">${CLASS_STYLE[cls][1]}</span>`;
 
+const TRAIN_BADGES = { correct: ['#81b64c', '✓'], wrong: ['#fa412d', '✕'], mate: ['#fa412d', '#'], winner: ['#81b64c', '♔'] };
 const S = {
-  game: null, plies: null, acc: null, sum: null, me: null, ply: 0, flipped: false, view: 'empty',
+  tab: 'review', game: null, plies: null, acc: null, sum: null, me: null, ply: 0, flipped: false, view: 'empty',
   explainOpen: false, step: 'move', variation: null, retry: null, playing: null, cache: {},
 };
 let engine = null;
@@ -52,7 +46,8 @@ const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
 svg.setAttribute('viewBox', '0 0 800 800');
 boardEl.appendChild(svg);
 
-const xy = s => (S.flipped ? [7 - fileOf(s), rankOf(s)] : [fileOf(s), 7 - rankOf(s)]);
+let FLIP = false;
+const xy = s => (FLIP ? [7 - fileOf(s), rankOf(s)] : [fileOf(s), 7 - rankOf(s)]);
 const pieceImg = p => `pieces/${'_pnbrqk'[p.type]}${p.color ? 'l' : 'd'}.png`;
 
 function placeSquares() {
@@ -77,12 +72,15 @@ function arrowPath(from, to) {
   return p.map(q => q.map(v => v.toFixed(1)).join(',')).join(' ');
 }
 
-// opts: last (Move), badge {sq, cls}, arrows [{from,to,kind}], tints {sq: 'good'|'bad'}, anim (Move), sel, dots
+// opts: last (Move), badge {sq, cls}, badges [{sq, kind}], arrows [{from,to,kind}], tints {sq: 'good'|'bad'|'hint'},
+// anim (Move), sel, dots, flipped
 function draw(board, opts = {}) {
+  const flip = opts.flipped ?? S.flipped;
+  if (flip !== FLIP) { FLIP = flip; placeSquares(); }
   const tints = opts.tints || {};
   for (let s = 0; s < 64; s++) {
     const d = squares[s];
-    d.classList.remove('hl', 'good', 'bad', 'sel');
+    d.classList.remove('hl', 'good', 'bad', 'sel', 'hint');
     if (opts.last && (opts.last.from === s || opts.last.to === s)) d.classList.add('hl');
     if (tints[s]) d.classList.add(tints[s]);
     if (opts.sel === s) d.classList.add('sel');
@@ -115,14 +113,17 @@ function draw(board, opts = {}) {
   for (const a of opts.arrows || []) html += `<polygon points="${arrowPath(a.from, a.to)}" fill="${ARROW[a.kind]}"/>`;
   svg.innerHTML = html;
   boardEl.querySelectorAll('.badge').forEach(e => e.remove());
-  if (opts.badge && CLASS_STYLE[opts.badge.cls]) {
-    const [x, y] = xy(opts.badge.sq);
+  const badges = (opts.badges || []).map(b => ({ sq: b.sq, style: TRAIN_BADGES[b.kind] }));
+  if (opts.badge && CLASS_STYLE[opts.badge.cls]) badges.push({ sq: opts.badge.sq, style: CLASS_STYLE[opts.badge.cls] });
+  for (const { sq, style } of badges) {
+    if (sq === undefined || !style) continue;
+    const [x, y] = xy(sq);
     const b = document.createElement('div');
     b.className = 'badge';
     b.style.left = (x + 1) * 12.5 + '%';
     b.style.top = y * 12.5 + '%';
-    b.style.background = CLASS_STYLE[opts.badge.cls][0];
-    b.textContent = CLASS_STYLE[opts.badge.cls][1];
+    b.style.background = style[0];
+    b.textContent = style[1];
     boardEl.appendChild(b);
   }
 }
@@ -160,6 +161,10 @@ function explained(i) {
 }
 
 function render(anim) {
+  $('app').classList.toggle('train', S.tab === 'train');
+  if (S.tab === 'train') $('app').classList.remove('summary');
+  document.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === S.tab));
+  if (S.tab === 'train') return trainer ? (drawTrain(anim), trainPanel()) : null;
   playerBars();
   if (S.view !== 'summary' || S.retry || S.variation) $('app').classList.remove('summary');
   if (S.retry) return renderRetry();
@@ -426,12 +431,17 @@ function squareAt(e) {
   const r = boardEl.getBoundingClientRect();
   const x = Math.floor((e.clientX - r.left) / r.width * 8), y = Math.floor((e.clientY - r.top) / r.height * 8);
   if (x < 0 || x > 7 || y < 0 || y > 7) return null;
-  return S.flipped ? (y * 8 + 7 - x) : ((7 - y) * 8 + x);
+  return FLIP ? (y * 8 + 7 - x) : ((7 - y) * 8 + x);
 }
 boardEl.addEventListener('pointerdown', e => {
   touch = { x: e.clientX, y: e.clientY, sq: squareAt(e), drag: null };
   const r = S.retry;
-  if (r && !r.result && !r.solution && touch.sq !== null) {
+  if (S.tab === 'train') {
+    if (trainer && touch.sq !== null && trainer.canDrag(touch.sq)) {
+      const el = pieceLayer.querySelector(`[data-sq="${touch.sq}"]`);
+      if (el) { touch.drag = el; touch.base = el.style.transform; }
+    }
+  } else if (r && !r.result && !r.solution && touch.sq !== null) {
     const p = r.board.pieceAt(touch.sq);
     if (p && p.color === r.board.turn) {
       const el = pieceLayer.querySelector(`[data-sq="${touch.sq}"]`);
@@ -452,6 +462,12 @@ boardEl.addEventListener('pointerup', e => {
   const t = touch; touch = null;
   if (!t) return;
   const sq = squareAt(e), r = S.retry;
+  if (S.tab === 'train') {
+    if (!trainer) return;
+    if (t.moved && t.drag) return sq !== null && sq !== t.sq ? trainer.onDrop(t.sq, sq) : drawTrain();
+    if (sq !== null) trainer.onSquare(sq);
+    return;
+  }
   if (r && !r.result && !r.solution) {
     if (t.moved && t.drag) {
       if (sq !== null && sq !== t.sq) return retryMove(promo(r.board, t.sq, sq));
@@ -640,15 +656,115 @@ async function analyse(pgn, quiet = false) {
   const names = store.get('names', []).map(x => x.toLowerCase());
   const w = (game.headers.White || '').toLowerCase(), b = (game.headers.Black || '').toLowerCase();
   const me = names.includes(w) ? true : names.includes(b) ? false : null;
+  S.tab = 'review';
   Object.assign(S, { game, plies, acc, me, sum: summarize(game, plies, acc, me), ply: 0, flipped: me === false,
     view: 'summary', explainOpen: false, step: 'move', variation: null, retry: null, cache: {} });
   store.set('last', pgn);
+  if (me !== null) { recordGame(game, plies, acc, me, S.sum); collectMistakes(game, plies, me); }
   placeSquares();
   render();
   if (!quiet) $('panel').scrollTop = 0;
 }
 
+// ---- Träning -----------------------------------------------------------------------
+
+let trainer = null, trainLoading = null;
+
+function drawTrain(anim) {
+  const v = trainer.view();
+  draw(v.board, { ...v, anim });
+}
+
+function trainPanel(keepScroll) {
+  const panel = $('panel');
+  const top = panel.scrollTop;
+  panel.innerHTML = trainer.panelHtml();
+  trainer.bind(panel);
+  if (keepScroll) panel.scrollTop = top;
+}
+
+function celebrate() {
+  const box = document.createElement('div');
+  box.className = 'confetti';
+  const colors = ['#81b64c', '#f7c631', '#26c2a3', '#ffa459', '#749bbf', '#fa412d', '#fff'];
+  for (let k = 0; k < 60; k++) {
+    const c = document.createElement('i');
+    c.style.left = Math.random() * 100 + '%';
+    c.style.background = colors[k % colors.length];
+    c.style.animationDelay = Math.random() * 0.4 + 's';
+    c.style.animationDuration = 1.4 + Math.random() * 1.2 + 's';
+    c.style.setProperty('--dx', (Math.random() * 120 - 60) + 'px');
+    c.style.setProperty('--r', (Math.random() * 720 - 360) + 'deg');
+    box.appendChild(c);
+  }
+  document.body.appendChild(box);
+  setTimeout(() => box.remove(), 3200);
+}
+
+// Hämtar och analyserar dina senaste partier, för Mina misstag och statistiken.
+async function batchAnalyse(limit, progress) {
+  const names = store.get('names', []);
+  if (!names.length) throw new Error('Hämta ett parti under Genomgång först, så vet jag vilka dina konton är.');
+  const lower = names.map(x => x.toLowerCase());
+  const all = [];
+  for (const nm of names) { try { all.push(...await recentGames(nm, limit)); } catch { /* nästa konto */ } }
+  const seen = new Set();
+  const games = all.sort((a, b) => b.end - a.end).filter(g => !seen.has(g.url) && seen.add(g.url)).slice(0, limit);
+  if (!games.length) throw new Error('Hittade inga partier på chess.com.');
+  await bookReady;
+  let added = 0;
+  for (const [k, g] of games.entries()) {
+    const game = loadGame(g.pgn);
+    const h = game.headers;
+    progress(k + 1, games.length, `${h.White} mot ${h.Black}`);
+    const key = 'pos:' + hash(gameKey(game.boards, game.moves));
+    let pos = store.get(key, null);
+    if (!pos || pos.length !== game.boards.length) {
+      pos = await getEngine().analysePositions(game.boards, null, MS_PER_POS);
+      store.set(key, pos);
+    }
+    const { plies, acc } = classifyAll(game.boards, game.moves, game.headers, pos);
+    const me = lower.includes((h.White || '').toLowerCase());
+    added += collectMistakes(game, plies, me);
+    recordGame(game, plies, acc, me);
+  }
+  return added;
+}
+
+async function openTrain() {
+  stopPlay();
+  S.tab = 'train';
+  if (trainer) return render();
+  $('app').classList.add('train');
+  $('app').classList.remove('summary');
+  document.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === 'train'));
+  $('panel').innerHTML = '<div class="pad"><p class="hint">Laddar pussel och lektioner…</p></div>';
+  trainLoading ||= Promise.all(['data/training.json', 'data/puzzles.json', 'data/themes.json'].map(u => fetch(u).then(r => r.json())))
+    .then(([training, puzzles, themes]) => {
+      trainer = new Trainer({
+        redraw: anim => { if (S.tab === 'train') drawTrain(anim); },
+        panel: keep => { if (S.tab === 'train') trainPanel(keep); },
+        celebrate,
+        analyse: (fen, ms) => getEngine().analyse(fen, ms),
+        batchAnalyse,
+      }, { training, puzzles, themes });
+      return bookReady;
+    });
+  await trainLoading;
+  if (S.tab === 'train') trainer.setMode('plan');
+  if (location.search.includes('test')) window.schack = { trainer, S };
+}
+
 // ---- Knappar ---------------------------------------------------------------------
+
+document.querySelectorAll('[data-tab]').forEach(b => {
+  b.onclick = () => {
+    if (b.dataset.tab === 'train') return openTrain();
+    S.tab = 'review';
+    if (trainer) { trainer.token++; trainer.stopClock(); }
+    render();
+  };
+});
 
 $('btn-fetch').onclick = openFetch;
 $('navbar').onclick = e => {

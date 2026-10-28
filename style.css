@@ -155,3 +155,41 @@ textarea.field { height: 120px; resize: vertical; font-size: 13px; }
 
 /* Översikten får hela höjden, som på chess.com. */
 #app.summary .board-row, #app.summary .player { display: none; }
+
+/* Flikar */
+.tabs { display: flex; gap: 4px; background: #1f1e1b; border-radius: 9px; padding: 3px; }
+.tabs button { border: 0; background: transparent; color: var(--muted); font-weight: 700; font-size: 14px; padding: 6px 10px; border-radius: 7px; }
+.tabs button.on { background: #3c3a37; color: #fff; }
+
+/* Träningsfliken: inga spelarrader, ingen mätare och ingen navigering, så att panelen får mer plats. */
+#app.train .player, #app.train .navbar, #app.train .evalbar { display: none; }
+#app.train .board { width: 100vw; max-width: 560px; }
+#app.train main#panel { padding-bottom: var(--safe-b); }
+.board .sq.hint.l { background: #8fd0ec; } .board .sq.hint.d { background: #5fb2d9; }
+.modes { display: flex; gap: 6px; overflow-x: auto; padding: 8px 10px; background: var(--panel-dark); scrollbar-width: none; }
+.modes::-webkit-scrollbar { display: none; }
+.modes button { flex: none; border: 0; border-radius: 16px; background: #3c3a37; padding: 7px 12px; font-size: 13px; font-weight: 700; white-space: nowrap; }
+.modes button.on { background: var(--green); }
+.bubble.good { background: var(--green); color: #fff; }
+.bubble.good::before { border-right-color: var(--green); }
+.bubble.bad { background: #d9534a; color: #fff; }
+.bubble.bad::before { border-right-color: #d9534a; }
+.bubble.good .ev, .bubble.bad .ev { background: rgba(0,0,0,.2); color: #fff; }
+.btn.danger { background: var(--red); }
+.tlist { margin-top: 10px; border-radius: 8px; overflow: hidden; }
+.titem { background: #1f1e1b; padding: 11px 12px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; cursor: pointer; }
+.titem:active { background: #3c3a37; }
+.titem.rec { border-left: 3px solid var(--green); }
+.titem span { color: var(--muted); font-size: 12.5px; }
+.trows { margin-top: 8px; }
+.trows h4 { margin: 12px 0 4px; font-size: 14px; }
+.trows p { margin: 3px 0; font-size: 14px; color: #e8e6e3; }
+.trows p.sub { padding-left: 14px; color: #cfcdca; }
+.trows p.muted { color: var(--muted); font-size: 12.5px; }
+.trows p.done, .trows p.good { color: var(--green-hi); }
+.trows p.done { font-weight: 700; }
+.trows p.bad { color: #ff8b7b; }
+.chart { width: 100%; height: 90px; display: block; background: #1f1e1b; border-radius: 6px; margin: 4px 0; }
+.confetti { position: fixed; inset: 0; pointer-events: none; z-index: 80; overflow: hidden; }
+.confetti i { position: absolute; top: -12px; width: 8px; height: 12px; border-radius: 2px; animation: fall linear forwards; }
+@keyframes fall { to { transform: translate(var(--dx), 105vh) rotate(var(--r)); } }
