@@ -193,3 +193,32 @@ textarea.field { height: 120px; resize: vertical; font-size: 13px; }
 .confetti { position: fixed; inset: 0; pointer-events: none; z-index: 80; overflow: hidden; }
 .confetti i { position: absolute; top: -12px; width: 8px; height: 12px; border-radius: 2px; animation: fall linear forwards; }
 @keyframes fall { to { transform: translate(var(--dx), 105vh) rotate(var(--r)); } }
+
+/* Coach-läget: spelarrader syns, men ingen mätare eller navigering. */
+#app.coach .navbar, #app.coach .evalbar { display: none; }
+#app.coach .board { width: 100vw; max-width: 560px; }
+#app.coach main#panel { padding-bottom: var(--safe-b); }
+.tabs button { padding: 6px 8px; font-size: 13px; }
+.chat { display: flex; flex-direction: column; gap: 8px; min-height: 52px; }
+.coachav.ghost { visibility: hidden; height: 0; }
+.bubble.typing .txt::after { content: "▍"; opacity: .5; animation: blink .8s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.actions .ask { flex: 1 1 100%; margin: 0 0 2px; font-weight: 700; }
+.titem.sel { background: #3c3a37; border-left: 3px solid var(--green); }
+.cmoves { margin-top: 12px; background: #1f1e1b; border-radius: 8px; padding: 8px 10px; }
+.copening { font-weight: 700; color: #d9d8d4; margin-bottom: 6px; font-size: 13px; }
+.cgrid { display: grid; grid-template-columns: 34px 1fr 1fr; row-gap: 3px; font-size: 14px; font-weight: 600; }
+.cgrid .n { color: var(--muted); font-weight: 400; }
+.cgrid i { font-style: normal; font-weight: 900; }
+.board-overlay { position: absolute; inset: 0; z-index: 20; display: grid; place-items: center; background: rgba(0,0,0,.35); animation: bub .25s ease-out; }
+.result { position: relative; background: #262522; border: 1px solid #3c3a37; border-radius: 12px; padding: 16px 18px; width: min(320px, 84%); text-align: center;
+  box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+.result h3 { margin: 0; font-size: 22px; }
+.result .rsub { margin: 2px 0 10px; color: var(--muted); font-size: 13px; }
+.result .rline { background: #fff; color: #312e2b; border-radius: 8px; padding: 8px 10px; text-align: left; font-size: 14px; margin: 0 0 10px; }
+.result .rcells { display: flex; justify-content: center; gap: 14px; margin-bottom: 12px; }
+.result .rc { display: flex; flex-direction: column; font-size: 11px; }
+.result .rc b { font-size: 17px; }
+.result .btn { margin-top: 6px; }
+.result .btn.primary { font-size: 16px; padding: 11px; }
+.result .rx { position: absolute; top: 8px; right: 8px; border: 0; background: transparent; color: var(--muted); font-size: 16px; }

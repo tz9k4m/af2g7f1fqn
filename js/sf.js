@@ -27,26 +27,36 @@ export class Engine {
       this.send(cmd);
     });
   }
-  // Värdering sett från vit (centibönder, matt = ±(MATE - drag)), bästa varianten och näst bästa värderingen.
-  analyse(fen, ms = 250) {
+  // Allmän sökning. multipv: antal varianter. elo: spela med begränsad styrka (UCI_LimitStrength).
+  // Returnerar {lines: [{score (från vit), pv}], best: uci}.
+  search(fen, { ms = 250, multipv = 2, elo = null } = {}) {
     const job = async () => {
       await this.ready;
       const white = fen.split(' ')[1] === 'w';
-      const lines = {};
+      const lines = [];
+      if (multipv !== 2) this.send(`setoption name MultiPV value ${multipv}`);
+      if (elo) { this.send('setoption name UCI_LimitStrength value true'); this.send(`setoption name UCI_Elo value ${elo}`); }
       this.send('position fen ' + fen);
-      await this._until(`go movetime ${ms}`, 'bestmove', line => {
+      const done = await this._until(`go movetime ${ms}`, 'bestmove', line => {
         if (!line.startsWith('info') || !line.includes(' pv ') || / (lower|upper)bound/.test(line)) return;
         const k = +(line.match(/ multipv (\d+)/) || [0, 1])[1];
         const cp = line.match(/ score cp (-?\d+)/), mate = line.match(/ score mate (-?\d+)/);
         let score;
         if (mate) { const n = +mate[1]; score = n > 0 ? MATE - n : -MATE - n; } else if (cp) score = +cp[1]; else return;
-        lines[k] = { score: white ? score : -score, pv: line.split(' pv ')[1].trim().split(' ').slice(0, 10) };
+        lines[k - 1] = { score: white ? score : -score, pv: line.split(' pv ')[1].trim().split(' ').slice(0, 10) };
       });
-      return { cp: lines[1] ? lines[1].score : 0, pv: lines[1] ? lines[1].pv : [], second: lines[2] ? lines[2].score : null };
+      if (multipv !== 2) this.send('setoption name MultiPV value 2');
+      if (elo) this.send('setoption name UCI_LimitStrength value false');
+      return { lines: lines.filter(Boolean), best: done.split(' ')[1] };
     };
     const p = this.queue.then(job);
     this.queue = p.catch(() => {});
     return p;
+  }
+  // Värdering sett från vit (centibönder, matt = ±(MATE - drag)), bästa varianten och näst bästa värderingen.
+  async analyse(fen, ms = 250) {
+    const { lines } = await this.search(fen, { ms });
+    return { cp: lines[0] ? lines[0].score : 0, pv: lines[0] ? lines[0].pv : [], second: lines[1] ? lines[1].score : null };
   }
   async analysePositions(boards, progress, ms = 250) {
     const pos = [];

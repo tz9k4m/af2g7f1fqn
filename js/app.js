@@ -7,6 +7,7 @@ import { Engine } from './sf.js';
 import { store, hash } from './store.js';
 import { recordGame, collectMistakes } from './stats.js';
 import { Trainer } from './train.js';
+import { Coach } from './coach_play.js';
 
 const CLASS_STYLE = {
   brilliant: ['#26c2a3', '!!'], great: ['#749bbf', '!'], best: ['#81b64c', '★'], excellent: ['#81b64c', '✓'],
@@ -15,14 +16,14 @@ const CLASS_STYLE = {
 };
 const STRIP_BADGES = new Set(['brilliant', 'great', 'inaccuracy', 'mistake', 'miss', 'blunder']);
 const BIG_MISTAKES = ['mistake', 'blunder', 'miss'];
-const ARROW = { best: 'rgba(150,190,70,.9)', threat: 'rgba(250,65,45,.85)', move: 'rgba(255,170,0,.85)' };
+const ARROW = { best: 'rgba(150,190,70,.9)', threat: 'rgba(250,65,45,.85)', move: 'rgba(255,170,0,.85)', hint: 'rgba(150,196,106,.75)' };
 const MS_PER_POS = 250;
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const icon = cls => `<span class="icon" style="background:${CLASS_STYLE[cls][0]}">${CLASS_STYLE[cls][1]}</span>`;
 
-const TRAIN_BADGES = { correct: ['#81b64c', '✓'], wrong: ['#fa412d', '✕'], mate: ['#fa412d', '#'], winner: ['#81b64c', '♔'] };
+const TRAIN_BADGES = { correct: ['#81b64c', '✓'], wrong: ['#fa412d', '✕'], mate: ['#fa412d', '#'], winner: ['#81b64c', '♔'], resign: ['#fa412d', '⚑'] };
 const S = {
   tab: 'review', game: null, plies: null, acc: null, sum: null, me: null, ply: 0, flipped: false, view: 'empty',
   explainOpen: false, step: 'move', variation: null, retry: null, playing: null, cache: {},
@@ -113,7 +114,7 @@ function draw(board, opts = {}) {
   for (const a of opts.arrows || []) html += `<polygon points="${arrowPath(a.from, a.to)}" fill="${ARROW[a.kind]}"/>`;
   svg.innerHTML = html;
   boardEl.querySelectorAll('.badge').forEach(e => e.remove());
-  const badges = (opts.badges || []).map(b => ({ sq: b.sq, style: TRAIN_BADGES[b.kind] }));
+  const badges = (opts.badges || []).map(b => ({ sq: b.sq, style: TRAIN_BADGES[b.kind] || CLASS_STYLE[b.kind] }));
   if (opts.badge && CLASS_STYLE[opts.badge.cls]) badges.push({ sq: opts.badge.sq, style: CLASS_STYLE[opts.badge.cls] });
   for (const { sq, style } of badges) {
     if (sq === undefined || !style) continue;
@@ -162,9 +163,10 @@ function explained(i) {
 
 function render(anim) {
   $('app').classList.toggle('train', S.tab === 'train');
-  if (S.tab === 'train') $('app').classList.remove('summary');
+  $('app').classList.toggle('coach', S.tab === 'coach');
+  if (S.tab !== 'review') $('app').classList.remove('summary');
   document.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === S.tab));
-  if (S.tab === 'train') return trainer ? (drawTrain(anim), trainPanel()) : null;
+  if (S.tab !== 'review') return act() ? (drawTrain(anim), trainPanel(), coachBars()) : null;
   playerBars();
   if (S.view !== 'summary' || S.retry || S.variation) $('app').classList.remove('summary');
   if (S.retry) return renderRetry();
@@ -436,8 +438,8 @@ function squareAt(e) {
 boardEl.addEventListener('pointerdown', e => {
   touch = { x: e.clientX, y: e.clientY, sq: squareAt(e), drag: null };
   const r = S.retry;
-  if (S.tab === 'train') {
-    if (trainer && touch.sq !== null && trainer.canDrag(touch.sq)) {
+  if (S.tab !== 'review') {
+    if (act() && touch.sq !== null && act().canDrag(touch.sq)) {
       const el = pieceLayer.querySelector(`[data-sq="${touch.sq}"]`);
       if (el) { touch.drag = el; touch.base = el.style.transform; }
     }
@@ -462,10 +464,10 @@ boardEl.addEventListener('pointerup', e => {
   const t = touch; touch = null;
   if (!t) return;
   const sq = squareAt(e), r = S.retry;
-  if (S.tab === 'train') {
-    if (!trainer) return;
-    if (t.moved && t.drag) return sq !== null && sq !== t.sq ? trainer.onDrop(t.sq, sq) : drawTrain();
-    if (sq !== null) trainer.onSquare(sq);
+  if (S.tab !== 'review') {
+    if (!act()) return;
+    if (t.moved && t.drag) return sq !== null && sq !== t.sq ? act().onDrop(t.sq, sq) : drawTrain();
+    if (sq !== null) act().onSquare(sq);
     return;
   }
   if (r && !r.result && !r.solution) {
@@ -657,6 +659,7 @@ async function analyse(pgn, quiet = false) {
   const w = (game.headers.White || '').toLowerCase(), b = (game.headers.Black || '').toLowerCase();
   const me = names.includes(w) ? true : names.includes(b) ? false : null;
   S.tab = 'review';
+  overlay(null);
   Object.assign(S, { game, plies, acc, me, sum: summarize(game, plies, acc, me), ply: 0, flipped: me === false,
     view: 'summary', explainOpen: false, step: 'move', variation: null, retry: null, cache: {} });
   store.set('last', pgn);
@@ -668,19 +671,54 @@ async function analyse(pgn, quiet = false) {
 
 // ---- Träning -----------------------------------------------------------------------
 
-let trainer = null, trainLoading = null;
+let trainer = null, coach = null, dataLoading = null;
+const act = () => (S.tab === 'coach' ? coach : S.tab === 'train' ? trainer : null);
 
 function drawTrain(anim) {
-  const v = trainer.view();
+  const v = act().view();
   draw(v.board, { ...v, anim });
 }
 
 function trainPanel(keepScroll) {
   const panel = $('panel');
   const top = panel.scrollTop;
-  panel.innerHTML = trainer.panelHtml();
-  trainer.bind(panel);
+  panel.innerHTML = act().panelHtml();
+  act().bind(panel);
   if (keepScroll) panel.scrollTop = top;
+  else if (S.tab === 'coach' && coach.cg) panel.scrollTop = 0;
+}
+
+// Spelarrader i coach-läget: coachen överst, du nederst (eller tvärtom när brädet är vänt).
+let coachPlayers = null;
+function coachBars() {
+  if (S.tab !== 'coach') return;
+  const p = coachPlayers;
+  const row = (name, white) => `<span class="av"><img src="pieces/k${white ? 'l' : 'd'}.png" alt=""></span><b>${esc(name)}</b>`;
+  $('bar-top').innerHTML = p ? row(p.coach, !p.youWhite) : '';
+  $('bar-bottom').innerHTML = p ? row(p.you, p.youWhite) : '';
+}
+
+// Ruta ovanpå brädet, t.ex. resultatet när ett coach-parti är slut.
+function overlay(html, handlers = {}) {
+  boardEl.querySelectorAll('.board-overlay').forEach(e => e.remove());
+  if (!html) return;
+  const d = document.createElement('div');
+  d.className = 'board-overlay';
+  d.innerHTML = html;
+  d.addEventListener('pointerdown', e => e.stopPropagation());
+  d.addEventListener('pointerup', e => e.stopPropagation());
+  d.querySelectorAll('[data-ract]').forEach(b => { b.onclick = () => handlers[b.dataset.ract](); });
+  boardEl.appendChild(d);
+}
+
+function myName() { return store.get('names', [])[0] || null; }
+function myRating() {
+  const g = S.game;
+  if (g && S.me !== null) {
+    const elo = (S.me ? g.headers.WhiteElo : g.headers.BlackElo) || '';
+    if (/^\d+$/.test(elo)) return +elo;
+  }
+  return 500;
 }
 
 function celebrate() {
@@ -731,40 +769,55 @@ async function batchAnalyse(limit, progress) {
   return added;
 }
 
-async function openTrain() {
-  stopPlay();
-  S.tab = 'train';
-  if (trainer) return render();
-  $('app').classList.add('train');
-  $('app').classList.remove('summary');
-  document.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === 'train'));
-  $('panel').innerHTML = '<div class="pad"><p class="hint">Laddar pussel och lektioner…</p></div>';
-  trainLoading ||= Promise.all(['data/training.json', 'data/puzzles.json', 'data/themes.json'].map(u => fetch(u).then(r => r.json())))
-    .then(([training, puzzles, themes]) => {
-      trainer = new Trainer({
-        redraw: anim => { if (S.tab === 'train') drawTrain(anim); },
-        panel: keep => { if (S.tab === 'train') trainPanel(keep); },
+function loadData() {
+  dataLoading ||= Promise.all(['data/training.json', 'data/puzzles.json', 'data/themes.json'].map(u => fetch(u).then(r => r.json())))
+    .then(async ([training, puzzles, themes]) => {
+      await bookReady;
+      const base = {
+        redraw: anim => { if (act()) drawTrain(anim); },
+        panel: keep => { if (act()) trainPanel(keep); },
         celebrate,
         analyse: (fen, ms) => getEngine().analyse(fen, ms),
-        batchAnalyse,
-      }, { training, puzzles, themes });
-      return bookReady;
+        search: (fen, opts) => getEngine().search(fen, opts),
+        batchAnalyse, myName, myRating, overlay,
+        players: p => { coachPlayers = p; coachBars(); },
+        toReview: pgn => { S.tab = 'review'; analyse(pgn); },
+      };
+      trainer = new Trainer(base, { training, puzzles, themes });
+      coach = new Coach(base, { training, puzzles, themes });
+      if (location.search.includes('test')) window.schack = { trainer, coach, S };
     });
-  await trainLoading;
-  if (S.tab === 'train') trainer.setMode('plan');
-  if (location.search.includes('test')) window.schack = { trainer, S };
+  return dataLoading;
+}
+
+async function openTab(tab) {
+  stopPlay();
+  if (act()) act().token++;
+  if (trainer) trainer.stopClock();
+  overlay(null);
+  S.tab = tab;
+  if (tab === 'review') return render();
+  const first = !trainer;
+  if (first) {
+    $('app').classList.toggle('train', tab === 'train');
+    $('app').classList.toggle('coach', tab === 'coach');
+    $('app').classList.remove('summary');
+    document.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
+    $('panel').innerHTML = '<div class="pad"><p class="hint">Laddar…</p></div>';
+    await loadData();
+    if (S.tab !== tab) return;
+  }
+  if (!act().mode) act().setMode(tab === 'coach' ? 'coach' : 'plan');
+  else {
+    render();
+    if (tab === 'coach' && coach.result) coach.showResult();
+    if (tab === 'coach' && coach.cg && !coach.cg.over && !coach.cg.waiting) coach.nextTurn();
+  }
 }
 
 // ---- Knappar ---------------------------------------------------------------------
 
-document.querySelectorAll('[data-tab]').forEach(b => {
-  b.onclick = () => {
-    if (b.dataset.tab === 'train') return openTrain();
-    S.tab = 'review';
-    if (trainer) { trainer.token++; trainer.stopClock(); }
-    render();
-  };
-});
+document.querySelectorAll('[data-tab]').forEach(b => { b.onclick = () => openTab(b.dataset.tab); });
 
 $('btn-fetch').onclick = openFetch;
 $('navbar').onclick = e => {
