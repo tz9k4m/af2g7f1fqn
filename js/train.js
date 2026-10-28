@@ -176,7 +176,7 @@ export class Trainer {
       else if (done >= goal) rows.push([`✓  ${name}: ${done}/${goal} ${unit}`, 'done']);
       else rows.push([`○  ${name}: ${done}/${goal} ${unit}`, 'li']);
     }
-    rows.push(['○  Spela ett långsamt parti (15|10) och gå igenom det under Genomgång.', 'li']);
+    rows.push(['○  Spela ett långsamt parti (15|10) och gå igenom det i Partigranskning.', 'li']);
     rows.push(['Varför just det här?', 'h']);
     for (const r of this.D.plan_advice) rows.push([r, r.startsWith('  ') ? 'li' : null]);
     rows.push(['Pjäser: "cburnett" av Colin M.L. Burnett (CC BY-SA 3.0). Pussel och öppningsnamn: Lichess databas (fri att använda). Motor: Stockfish (GPL).', 'muted']);
@@ -640,7 +640,7 @@ export class Trainer {
   start_stats() {
     const hist = loadHistory();
     if (!hist.length) {
-      this.setBubble('Ingen statistik än', 'Statistiken byggs av dina analyserade partier. Hämta ett parti under Genomgång, eller analysera dina senaste partier på en gång.');
+      this.setBubble('Ingen statistik än', 'Statistiken byggs av dina analyserade partier. Hämta ett parti i Partigranskning, eller analysera dina senaste partier på en gång.');
       this.write([['Varje parti du analyserar sparas här: precision, misstag, faser och öppningar.', 'muted']]);
       this.setActions([['Analysera mina 10 senaste partier', () => this.batchAnalyse(), 'primary']]);
       return;
@@ -1020,16 +1020,20 @@ export class Trainer {
     this.locked = false;
   }
 
-  // ---------- HTML för panelen ----------
-  panelHtml() {
+  // ---------- HTML: coachens bubbla ovanför brädet, listor och text under ----------
+  coachHtml() {
     const b = this.bubble;
-    let h = '<div class="modes" id="t-modes">' + MODES.map(([k, label]) => `<button data-mode="${k}" class="${k === this.mode ? 'on' : ''}">${label}</button>`).join('') + '</div><div class="pad">';
-    h += `<div class="coachrow"><div class="coachav"><img src="pieces/kl.png" alt=""></div><div class="bubble ${b.tone || ''}">
-      <div class="head"><span id="t-head">${esc(b.head)}</span>${b.clock ? '<span class="ev" id="t-clock">⏱ 0:00</span>' : ''}</div>
-      ${b.body ? `<div class="txt">${esc(b.body)}</div>` : ''}</div></div>`;
-    if (this.actions.length) {
-      h += '<div class="actions">' + this.actions.map(([label, , style], k) => `<button class="btn${style === 'primary' ? ' go' : style === 'danger' ? ' danger' : ''}" data-act="${k}">${esc(label)}</button>`).join('') + '</div>';
-    }
+    const clock = b.clock ? '<span class="ev" id="t-clock">⏱ 0:00</span>' : '';
+    return `<div class="bubble ${b.tone || ''}"><div class="head"><span class="t" id="t-head">${esc(b.head)}</span>${clock}</div>
+      ${b.body ? `<div class="txt">${esc(b.body)}</div>` : ''}</div>`;
+  }
+  // Brädet döljs när det bara skulle visa en tom startställning, t.ex. medan du väljer i en lista.
+  boardShown() {
+    if (this.list || this.mode === 'plan' || this.mode === 'stats') return false;
+    return !(this.locked && !this.last && this.board.fen() === new Board().fen());
+  }
+  panelHtml() {
+    let h = '<div class="pad">';
     if (this.list) {
       h += '<div class="tlist">' + this.list.entries.map(([label, sub], k) => `<div class="titem${k === this.list.selected ? ' rec' : ''}" data-item="${k}"><b>${esc(label)}</b>${sub ? `<span>${esc(sub)}</span>` : ''}</div>`).join('') + '</div>';
     }
@@ -1042,11 +1046,7 @@ export class Trainer {
     return h;
   }
   bind(root) {
-    root.querySelectorAll('[data-mode]').forEach(e => { e.onclick = () => this.setMode(e.dataset.mode); });
-    root.querySelectorAll('[data-act]').forEach(e => { e.onclick = () => this.actions[+e.dataset.act][1](); });
     root.querySelectorAll('[data-item]').forEach(e => { e.onclick = () => this.list.onPick(+e.dataset.item); });
-    const cur = root.querySelector('#t-modes .on');
-    if (cur) cur.scrollIntoView({ inline: 'center', block: 'nearest' });
   }
 }
 

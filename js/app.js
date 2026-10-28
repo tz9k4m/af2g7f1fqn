@@ -1,5 +1,5 @@
 // Mobilversionen av Schackreview: hämta parti, Stockfish-analys, sammanfattning och granskning med förklaringar.
-import { Board, Move, PAWN, QUEEN, sqName, fileOf, rankOf } from './pc.js';
+import { Board, Move, PAWN, QUEEN, fileOf, rankOf } from './pc.js';
 import { loadBook, classifyAll, gameKey, fmtEval, winPct } from './engine.js';
 import { loadGame, summarize, ORDER, PHASES, SKILLS } from './game.js';
 import { shortLine, deepExplain, CLASS_SV, BAD, describeMove } from './coach.js';
@@ -8,25 +8,31 @@ import { store, hash } from './store.js';
 import { recordGame, collectMistakes } from './stats.js';
 import { Trainer } from './train.js';
 import { Coach } from './coach_play.js';
+import { svgIcon, iconFor } from './icons.js';
 
 const CLASS_STYLE = {
-  brilliant: ['#26c2a3', '!!'], great: ['#749bbf', '!'], best: ['#81b64c', '★'], excellent: ['#81b64c', '✓'],
+  brilliant: ['#26c2a3', '!!'], great: ['#749bbf', '!'], best: ['#81b64c', '★'], excellent: ['#81b64c', '👍'],
   good: ['#95b776', '✓'], book: ['#d5a47d', '≡'], inaccuracy: ['#f7c631', '?!'], mistake: ['#ffa459', '?'],
   miss: ['#ff7769', '✕'], blunder: ['#fa412d', '??'], forced: ['#97958f', '→'],
 };
 const STRIP_BADGES = new Set(['brilliant', 'great', 'inaccuracy', 'mistake', 'miss', 'blunder']);
+const STRIP_COLOR = new Set(['brilliant', 'great', 'inaccuracy', 'mistake', 'miss', 'blunder']);
 const BIG_MISTAKES = ['mistake', 'blunder', 'miss'];
-const ARROW = { best: 'rgba(150,190,70,.9)', threat: 'rgba(250,65,45,.85)', move: 'rgba(255,170,0,.85)', hint: 'rgba(150,196,106,.75)' };
+const ARROW = { best: 'rgba(150,190,70,.85)', threat: 'rgba(250,65,45,.8)', move: 'rgba(255,170,0,.85)', hint: 'rgba(150,196,106,.75)' };
 const MS_PER_POS = 250;
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const icon = cls => `<span class="icon" style="background:${CLASS_STYLE[cls][0]}">${CLASS_STYLE[cls][1]}</span>`;
+// Pjäsbokstaven blir en symbol, som i chess.com:s dragrad. ︎ hindrar iOS från att rita den som emoji.
+const GLYPH = { K: '♔', Q: '♕', R: '♖', B: '♗', N: '♘' };
+const fig = san => (GLYPH[san[0]] ? GLYPH[san[0]] + '︎' + san.slice(1) : san);
+const evalText = cp => fmtEval(cp).replace('.', ',').replace('-', '−');
 
 const TRAIN_BADGES = { correct: ['#81b64c', '✓'], wrong: ['#fa412d', '✕'], mate: ['#fa412d', '#'], winner: ['#81b64c', '♔'], resign: ['#fa412d', '⚑'] };
 const S = {
-  tab: 'review', game: null, plies: null, acc: null, sum: null, me: null, ply: 0, flipped: false, view: 'empty',
-  explainOpen: false, step: 'move', variation: null, retry: null, playing: null, cache: {},
+  tab: 'home', game: null, plies: null, acc: null, sum: null, me: null, ply: 0, flipped: false, view: 'empty',
+  explainOpen: false, step: 'move', showBest: false, variation: null, retry: null, playing: null, cache: {},
 };
 let engine = null;
 const getEngine = () => (engine ||= new Engine());
@@ -73,19 +79,27 @@ function arrowPath(from, to) {
   return p.map(q => q.map(v => v.toFixed(1)).join(',')).join(' ');
 }
 
-// opts: last (Move), badge {sq, cls}, badges [{sq, kind}], arrows [{from,to,kind}], tints {sq: 'good'|'bad'|'hint'},
-// anim (Move), sel, dots, flipped
+// opts: last (Move), lastCls (färgar senaste draget efter klassen), badge {sq, cls}, badges [{sq, kind}],
+// arrows [{from,to,kind}], tints {sq: 'good'|'bad'|'hint'}, anim (Move), sel, dots, flipped
 function draw(board, opts = {}) {
   const flip = opts.flipped ?? S.flipped;
   if (flip !== FLIP) { FLIP = flip; placeSquares(); }
   const tints = opts.tints || {};
+  const lastColor = opts.lastCls && CLASS_STYLE[opts.lastCls] ? CLASS_STYLE[opts.lastCls][0] : null;
   for (let s = 0; s < 64; s++) {
     const d = squares[s];
     d.classList.remove('hl', 'good', 'bad', 'sel', 'hint');
-    if (opts.last && (opts.last.from === s || opts.last.to === s)) d.classList.add('hl');
+    d.querySelectorAll('.dot,.ring,.tint').forEach(e => e.remove());
+    if (opts.last && (opts.last.from === s || opts.last.to === s)) {
+      if (lastColor) {
+        const t = document.createElement('div');
+        t.className = 'tint';
+        t.style.background = lastColor;
+        d.appendChild(t);
+      } else d.classList.add('hl');
+    }
     if (tints[s]) d.classList.add(tints[s]);
     if (opts.sel === s) d.classList.add('sel');
-    d.querySelectorAll('.dot,.ring').forEach(e => e.remove());
     if (opts.dots && opts.dots.has(s)) {
       const m = document.createElement('div');
       m.className = board.pieceAt(s) ? 'ring' : 'dot';
@@ -129,26 +143,84 @@ function draw(board, opts = {}) {
   }
 }
 
+// Vit del från vänster, siffran i den del som leder.
 function setEval(cp) {
-  $('evalbar').classList.toggle('flip', S.flipped);
-  $('evalfill').style.height = cp === null || cp === undefined ? '50%' : winPct(cp) + '%';
+  const has = cp !== null && cp !== undefined;
+  const w = has ? winPct(cp) : 50;
+  $('evalfill').style.width = w + '%';
+  const t = $('evaltxt');
+  t.textContent = has ? evalText(cp) : '';
+  t.className = 'etxt ' + (!has || cp >= 0 ? 'w' : 'b');
 }
 
-// ---- Spelarrader ----------------------------------------------------------------
+// ---- Ramen: rubrik, coach, dragrad och knapprad ------------------------------------
 
-function playerBars() {
-  const h = S.game ? S.game.headers : {};
-  const row = color => {
-    const name = (color ? h.White : h.Black) || (color ? 'Vit' : 'Svart');
-    const elo = color ? h.WhiteElo : h.BlackElo;
-    const acc = S.acc && S.acc[color] !== null ? S.acc[color].toFixed(1) : null;
-    const you = S.me === color ? ' <span class="muted">(du)</span>' : '';
-    return `<span class="av"><img src="pieces/k${color ? 'l' : 'd'}.png" alt=""></span><b>${esc(name)}</b>`
-      + (elo ? `<span class="muted">(${esc(elo)})</span>` : '') + you
-      + (acc ? `<span class="acc${color ? '' : ' dark'}">${acc}</span>` : '');
-  };
-  $('bar-top').innerHTML = row(S.flipped);
-  $('bar-bottom').innerHTML = row(!S.flipped);
+function header(title, { back = true, close = false, right = [] } = {}) {
+  $('h-title').textContent = title;
+  const b = $('h-back');
+  b.hidden = !back;
+  b.innerHTML = svgIcon(close ? 'close' : 'back');
+  $('h-right').innerHTML = right.map((r, k) => `<button class="hbtn" data-h="${k}" aria-label="${esc(r.label)}">${svgIcon(r.icon)}</button>`).join('');
+  $('h-right').querySelectorAll('[data-h]').forEach(e => { e.onclick = () => right[+e.dataset.h].fn(); });
+}
+
+function layout({ board = true, evalbar = true, strip = true } = {}) {
+  const c = $('app').classList;
+  c.toggle('noboard', !board);
+  c.toggle('noeval', !evalbar);
+  c.toggle('nostrip', !strip);
+}
+
+const AVATAR = '<div class="avatar"><img src="pieces/nl.png" alt=""></div>';
+function bubbleHtml(head, txt, ev = null, tone = '') {
+  const pill = ev === null || ev === undefined ? '' : `<span class="ev${ev < 0 ? ' neg' : ''}">${evalText(ev)}</span>`;
+  return `<div class="bubble ${tone}">${head ? `<div class="head">${head}${pill}</div>` : ''}${txt ? `<div class="txt">${txt}</div>` : ''}</div>`;
+}
+function setCoach(bubbles) { $('coachbox').innerHTML = `${AVATAR}<div class="bubbles">${bubbles}</div>`; }
+
+// items: {label, fn, primary, danger, icon, disabled, on} eller {ask: text}
+function setBar(items) {
+  const bar = $('bar');
+  const clean = l => l.replace(/^[^\p{L}\d]+\s*/u, '');
+  const icons = items.filter(i => !i.primary && !i.ask), main = items.filter(i => i.primary), asks = items.filter(i => i.ask);
+  let h = asks.map(i => `<p class="ask">${esc(i.ask)}</p>`).join('');
+  const all = [...icons, ...main];
+  all.forEach((it, k) => {
+    const label = clean(it.label);
+    if (it.primary) {
+      const cls = ['gbtn', !icons.length ? 'full' : '', it.danger ? 'red' : '', label.length > 11 ? 'long' : ''].join(' ');
+      h += `<button class="${cls}" data-b="${k}">${esc(label)}</button>`;
+    } else {
+      h += `<button class="abtn${it.danger ? ' danger' : ''}${it.on ? ' on' : ''}" data-b="${k}"${it.disabled ? ' disabled' : ''}>${svgIcon(it.icon || iconFor(label))}<span>${esc(label)}</span></button>`;
+    }
+  });
+  bar.innerHTML = h;
+  bar.querySelectorAll('[data-b]').forEach(e => { e.onclick = () => all[+e.dataset.b].fn(); });
+}
+
+// ---- Startsidan --------------------------------------------------------------------
+
+const HOME_TILES = [['plan', '📅', 'Dagens pass', 'Ett pass på ungefär 30 minuter'], ['tactics', '🧩', 'Pussel', 'Taktik på din nivå'],
+  ['rush', '⚡', 'Pussel Rush', 'Så många du hinner'], ['lessons', '📘', 'Lektioner', 'Lär dig ett mönster i taget'],
+  ['patterns', '🎯', 'Vanliga fel', 'Det du missar oftast'], ['mistakes', '🔁', 'Mina misstag', 'Repetera dina egna fel'],
+  ['openings', '📖', 'Öppningar', 'Lär dig dina linjer'], ['endgames', '♔', 'Slutspel', 'Matta och vinn slutspel'],
+  ['stats', '📈', 'Statistik', 'Hur det går över tid']];
+
+function renderHome() {
+  header('Schackreview', { back: false, right: [{ icon: 'search', label: 'Hämta parti', fn: openFetch }] });
+  const h = S.game ? S.game.headers : null;
+  const last = h ? `${esc(h.White || 'Vit')} mot ${esc(h.Black || 'Svart')}` : 'Hämta ett parti från chess.com';
+  let html = `<button class="hero" id="h-review"><span class="hi" style="background:#81b64c">★</span><div><b>Partigranskning</b><span>${last}</span></div></button>`;
+  html += `<button class="hero" id="h-coach"><span class="hi" style="background:#5d8a32"><img src="pieces/nl.png" alt="" style="width:40px"></span><div><b>Spela med coach</b><span>Ett parti med tips och förklaringar</span></div></button>`;
+  if (S.game) html += `<button class="hero" id="h-fetch"><span class="hi" style="background:#3c3a37">🔍</span><div><b>Hämta nytt parti</b><span>Välj bland dina senaste partier</span></div></button>`;
+  html += '<h2>Träning</h2><div class="tiles">' + HOME_TILES.map(([k, ic, name, sub]) => `<button class="tile" data-m="${k}"><span class="ti">${ic}</span><b>${name}</b><span>${sub}</span></button>`).join('') + '</div>';
+  const home = $('home');
+  home.innerHTML = html;
+  $('h-review').onclick = () => (S.game ? openTab('review') : openFetch());
+  $('h-coach').onclick = () => openTab('coach');
+  if ($('h-fetch')) $('h-fetch').onclick = openFetch;
+  home.querySelectorAll('[data-m]').forEach(e => { e.onclick = () => openTab('train', e.dataset.m); });
+  $('bar').innerHTML = '';
 }
 
 // ---- Granskningen ---------------------------------------------------------------
@@ -162,64 +234,79 @@ function explained(i) {
 }
 
 function render(anim) {
-  $('app').classList.toggle('train', S.tab === 'train');
-  $('app').classList.toggle('coach', S.tab === 'coach');
-  if (S.tab !== 'review') $('app').classList.remove('summary');
-  document.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === S.tab));
-  if (S.tab !== 'review') return act() ? (drawTrain(anim), trainPanel(), coachBars()) : null;
-  playerBars();
-  if (S.view !== 'summary' || S.retry || S.variation) $('app').classList.remove('summary');
+  $('app').classList.toggle('v-home', S.tab === 'home');
+  if (S.tab === 'home') return renderHome();
+  if (S.tab !== 'review') return act() ? (drawTrain(anim), trainPanel()) : null;
+  const right = [{ icon: 'flip', label: 'Vänd brädet', fn: () => { S.flipped = !S.flipped; placeSquares(); render(); } }];
+  if (S.game && S.view !== 'summary') right.push({ icon: 'chart', label: 'Översikt', fn: () => { S.view = 'summary'; S.retry = null; S.variation = null; render(); } });
+  header('Partigranskning', { close: S.view === 'summary' && !S.retry && !S.variation, right: S.view === 'summary' ? [{ icon: 'search', label: 'Hämta parti', fn: openFetch }] : right });
   if (S.retry) return renderRetry();
   if (S.variation) return renderVariation(anim);
   if (!S.game) {
+    layout({ evalbar: false, strip: false });
     draw(new Board());
-    setEval(null);
     return renderEmpty();
   }
+  if (S.view === 'summary') {
+    layout({ board: false });
+    return renderSummary();
+  }
+  layout();
   const p = S.ply, i = p - 1;
   const info = p > 0 && S.plies ? S.plies[i] : null;
-  let board = S.game.boards[p], arrows = [], last = p > 0 ? S.game.moves[i] : null, badge = null;
+  let board = S.game.boards[p], arrows = [], last = p > 0 ? S.game.moves[i] : null, badge = null, lastCls = info ? info.cls : null;
   if (info) badge = { sq: S.game.moves[i].to, cls: info.cls };
-  if (info && S.view === 'review') {
-    if (S.explainOpen && S.step === 'best' && info.best && !info.best.eq(S.game.moves[i])) {
+  if (info) {
+    const best = info.best && !info.best.eq(S.game.moves[i]) ? info.best : null;
+    if (S.showBest && best) {
       board = S.game.boards[i];
-      arrows = [{ from: info.best.from, to: info.best.to, kind: 'best' }];
+      arrows = [{ from: best.from, to: best.to, kind: 'best' }];
+      last = null; badge = null; anim = null;
+    } else if (S.explainOpen && S.step === 'best' && best) {
+      board = S.game.boards[i];
+      arrows = [{ from: best.from, to: best.to, kind: 'best' }];
       last = null; badge = null; anim = null;
     } else if (S.explainOpen && S.step === 'reply' && info.reply_pv.length) {
       arrows = [{ from: info.reply_pv[0].from, to: info.reply_pv[0].to, kind: 'threat' }];
-    } else if (BAD.includes(info.cls) && info.best && !info.best.eq(S.game.moves[i])) {
-      arrows = [{ from: info.best.from, to: info.best.to, kind: 'best' }];
+    } else if (BAD.includes(info.cls) && best) {
+      arrows = [{ from: best.from, to: best.to, kind: 'best' }];
     }
   }
-  $('app').classList.toggle('summary', S.view === 'summary');
-  draw(board, { last, badge, arrows, anim });
+  draw(board, { last, lastCls, badge, arrows, anim });
   setEval(S.plies ? (p > 0 ? S.plies[i].cp_after : S.plies[0]?.cp_before) : null);
-  if (S.view === 'summary') renderSummary(); else renderReview();
+  renderReview();
 }
 
 function renderEmpty() {
-  $('panel').innerHTML = `<div class="pad">
-    <div class="coachrow"><div class="coachav"><img src="pieces/kl.png" alt=""></div>
-    <div class="bubble"><div class="head">Hej!</div><div class="txt">Hämta ett parti från chess.com så går vi igenom det tillsammans.
-    Jag visar vad som hände, vad motståndaren hotade och vad som hade varit bättre.</div></div></div>
-    <div class="actions"><button class="btn go" id="e-fetch">Hämta parti</button></div></div>`;
-  $('e-fetch').onclick = openFetch;
+  setCoach(bubbleHtml('Hej!', 'Hämta ett parti från chess.com så går vi igenom det tillsammans. Jag visar vad som hände och vad som hade varit bättre.'));
+  $('strip').innerHTML = '';
+  $('panel').innerHTML = '';
+  setBar([{ label: 'Hämta parti', fn: openFetch, primary: true }]);
 }
 
-function strip() {
-  let h = '<div class="strip" id="strip">';
+function stripHtml() {
+  let h = '';
   S.game.sans.forEach((san, i) => {
     const b = S.game.boards[i];
     const num = b.turn ? `<span class="n">${b.fullmoveNumber}.</span>` : (i === 0 ? `<span class="n">${b.fullmoveNumber}…</span>` : '');
     const cls = S.plies[i].cls;
-    h += `<div class="mv${S.ply === i + 1 ? ' cur' : ''}" data-ply="${i + 1}">${num}${STRIP_BADGES.has(cls) ? icon(cls) : ''}${esc(san)}</div>`;
+    const col = STRIP_COLOR.has(cls) && cls !== 'great' && cls !== 'brilliant' ? ` style="color:${CLASS_STYLE[cls][0]}"` : '';
+    h += `${num}<div class="mv${S.ply === i + 1 ? ' cur' : ''}" data-ply="${i + 1}"${col}>${STRIP_BADGES.has(cls) ? icon(cls) : ''}${esc(fig(san))}</div>`;
   });
-  return h + '</div>';
+  return h;
 }
 
-function bubbleHtml(head, txt, ev) {
-  return `<div class="coachrow"><div class="coachav"><img src="pieces/kl.png" alt=""></div>
-    <div class="bubble"><div class="head">${head}${ev ? `<span class="ev">${ev}</span>` : ''}</div><div class="txt">${txt}</div></div></div>`;
+function setStrip(html, onPick) {
+  const st = $('strip');
+  const keep = st.scrollLeft;
+  st.innerHTML = html;
+  st.scrollLeft = keep;
+  const cur = st.querySelector('.cur');
+  if (cur) {
+    const left = cur.offsetLeft - st.clientWidth / 2 + cur.offsetWidth / 2;
+    st.scrollTo({ left, behavior: Math.abs(left - keep) > 400 ? 'auto' : 'smooth' });
+  }
+  st.onclick = e => { const m = e.target.closest('[data-ply]'); if (m && onPick) onPick(+m.dataset.ply); };
 }
 
 function sectionsHtml(sections) {
@@ -236,56 +323,60 @@ function sectionsHtml(sections) {
 
 function renderReview() {
   const p = S.ply, i = p - 1;
-  let h = strip() + '<div class="pad">';
-  if (p === 0) {
-    h += bubbleHtml('Partiet börjar', 'Tryck › eller svep på brädet för att gå igenom dragen. ⚡ hoppar till ditt nästa misstag.');
-    h += `<div class="actions"><button class="btn" id="a-sum">📊 Översikt</button><button class="btn go" id="a-next">⚡ Nästa misstag</button></div>`;
+  setStrip(stripHtml(), k => go(k));
+  let panel = '';
+  const info = p > 0 ? S.plies[i] : null;
+  const best = info && info.best && !info.best.eq(S.game.moves[i]) ? info.best : null;
+  if (!info) {
+    setCoach(bubbleHtml('Partiet börjar', 'Tryck på Nästa eller svep på brädet för att gå igenom dragen. Nästa fel hoppar till ditt nästa misstag.'));
+  } else if (S.showBest && best) {
+    const b = S.game.boards[i];
+    const txt = esc(describeMove(b, best));
+    setCoach(bubbleHtml(`${icon('best')}<span class="t">${esc(fig(b.san(best)))} var bäst</span>`, txt.charAt(0).toUpperCase() + txt.slice(1) + '.', info.cp_before));
   } else {
-    const info = S.plies[i], b = S.game.boards[i], mv = S.game.moves[i];
-    const label = info.cls === 'book' && info.last_book ? 'Sista bokdraget' : CLASS_SV[info.cls][1];
-    const head = `${icon(info.cls)}${esc(S.game.sans[i])} · ${label}`;
-    h += bubbleHtml(head, esc(shortLine(b, mv, info, S.me)), fmtEval(info.cp_after));
-    const canRetry = isMine(i) && BAD.includes(info.cls) && info.best;
-    h += `<div class="actions"><button class="btn${S.explainOpen ? ' go' : ''}" id="a-explain">${S.explainOpen ? 'Dölj' : '💡 Förklara'}</button>`
-      + (canRetry ? '<button class="btn" id="a-retry">↻ Försök igen</button>' : '')
-      + '<button class="btn" id="a-next">⚡ Nästa fel</button></div>';
-    if (S.explainOpen) {
-      const d = explained(i);
-      const mover = isMine(i) ? 'Ditt drag' : 'Draget';
-      const groups = { move: d.sections.filter(s => !s[2] || s[2] === 'warn'), reply: d.sections.filter(s => s[2] === 'threat'), best: d.sections.filter(s => s[2] === 'best') };
-      if (!groups[S.step].length) S.step = 'move';
-      h += `<div class="sec"><p>${esc(d.coach)}</p></div><div class="steps">`
-        + `<button data-step="move" class="${S.step === 'move' ? 'on' : ''}">1 · ${mover}</button>`
-        + (groups.reply.length ? `<button data-step="reply" class="${S.step === 'reply' ? 'on' : ''}">2 · Svaret</button>` : '')
-        + (groups.best.length ? `<button data-step="best" class="${S.step === 'best' ? 'on' : ''}">3 · Bättre</button>` : '')
-        + '</div>' + sectionsHtml(groups[S.step]);
-      if (S.step === 'reply' && d.reply_pv.length > 1) h += '<div class="actions"><button class="btn" id="a-line" data-line="reply">▶ Spela upp svaret på brädet</button></div>';
-      if (S.step === 'best' && d.best_pv.length > 1) h += '<div class="actions"><button class="btn go" id="a-line" data-line="best">▶ Spela upp det bättre draget</button></div>';
-    }
+    const b = S.game.boards[i], mv = S.game.moves[i];
+    const what = info.cls === 'book' && info.last_book ? 'sista bokdraget' : CLASS_SV[info.cls][0];
+    const head = `${icon(info.cls)}<span class="t">${esc(fig(S.game.sans[i]))} är ${what}</span>`;
+    setCoach(bubbleHtml(head, esc(shortLine(b, mv, info, S.me)), info.cp_after));
   }
-  h += '</div>';
-  const panel = $('panel');
-  const keep = panel.querySelector('#strip')?.scrollLeft;
-  panel.innerHTML = h;
-  const st = $('strip');
-  if (keep !== undefined) st.scrollLeft = keep;
-  const cur = st.querySelector('.cur');
-  if (cur) cur.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
-  st.onclick = e => { const m = e.target.closest('.mv'); if (m) go(+m.dataset.ply); };
-  const on = (id, f) => { const el = $(id); if (el) el.onclick = f; };
-  on('a-sum', () => { S.view = 'summary'; render(); });
-  on('a-next', nextMistake);
-  on('a-explain', () => { S.explainOpen = !S.explainOpen; S.step = 'move'; render(); });
-  on('a-retry', startRetry);
-  on('a-line', e => playLine(e.currentTarget.dataset.line));
-  panel.querySelectorAll('[data-step]').forEach(b => { b.onclick = () => { S.step = b.dataset.step; render(); }; });
+  if (info && S.explainOpen) {
+    const d = explained(i);
+    const mover = isMine(i) ? 'Ditt drag' : 'Draget';
+    const groups = { move: d.sections.filter(s => !s[2] || s[2] === 'warn'), reply: d.sections.filter(s => s[2] === 'threat'), best: d.sections.filter(s => s[2] === 'best') };
+    if (!groups[S.step].length) S.step = 'move';
+    panel += `<div class="pad"><div class="explain"><p>${esc(d.coach)}</p><div class="steps">`
+      + `<button data-step="move" class="${S.step === 'move' ? 'on' : ''}">1 · ${mover}</button>`
+      + (groups.reply.length ? `<button data-step="reply" class="${S.step === 'reply' ? 'on' : ''}">2 · Svaret</button>` : '')
+      + (groups.best.length ? `<button data-step="best" class="${S.step === 'best' ? 'on' : ''}">3 · Bättre</button>` : '')
+      + '</div>' + sectionsHtml(groups[S.step]);
+    if (S.step === 'reply' && d.reply_pv.length > 1) panel += '<div class="actions"><button class="btn" id="a-line" data-line="reply">▶ Spela upp svaret på brädet</button></div>';
+    if (S.step === 'best' && d.best_pv.length > 1) panel += '<div class="actions"><button class="btn go" id="a-line" data-line="best">▶ Spela upp det bättre draget</button></div>';
+    panel += '</div></div>';
+  }
+  const el = $('panel');
+  el.innerHTML = panel;
+  const line = $('a-line');
+  if (line) line.onclick = () => playLine(line.dataset.line);
+  el.querySelectorAll('[data-step]').forEach(b => { b.onclick = () => { S.step = b.dataset.step; render(); }; });
+
+  const canRetry = info && isMine(i) && BAD.includes(info.cls) && info.best;
+  setBar([
+    canRetry ? { label: 'Gör om', icon: 'retry', fn: startRetry } : { label: 'Översikt', icon: 'chart', fn: () => { S.view = 'summary'; render(); } },
+    { label: 'Förklara', icon: 'eye', on: S.explainOpen, disabled: !info, fn: () => {
+      S.explainOpen = !S.explainOpen; S.step = 'move'; S.showBest = false; render();
+      if (S.explainOpen) $('panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } },
+    { label: 'Bäst', icon: 'star', on: S.showBest, disabled: !best, fn: () => { S.showBest = !S.showBest; S.explainOpen = false; render(); } },
+    { label: 'Nästa fel', icon: 'bolt', fn: nextMistake },
+    p >= n() ? { label: 'Översikt', primary: true, fn: () => { S.view = 'summary'; render(); } } : { label: 'Nästa', primary: true, fn: () => go(S.ply + 1) },
+  ]);
 }
 
 function go(p, animate = true) {
   stopPlay();
   p = Math.max(0, Math.min(n(), p));
   const anim = animate && p === S.ply + 1 ? S.game.moves[p - 1] : null;
-  if (p !== S.ply) { S.explainOpen = false; S.step = 'move'; }
+  if (p !== S.ply) { S.explainOpen = false; S.step = 'move'; S.showBest = false; }
   S.ply = p;
   if (S.view !== 'review' && S.game && S.plies) S.view = 'review';
   render(anim);
@@ -298,23 +389,9 @@ function nextMistake() {
   const next = mine.find(i => i + 1 > S.ply) ?? mine[0];
   S.view = 'review';
   go(next + 1, false);
-  S.explainOpen = true; S.step = 'move';
-  render();
 }
 
-function stopPlay() { if (S.playing) { clearInterval(S.playing); S.playing = null; document.querySelector('[data-nav="play"]').textContent = '▶'; } }
-function togglePlay() {
-  if (S.playing) return stopPlay();
-  if (!S.game || !S.plies) return;
-  if (S.ply >= n()) S.ply = 0;
-  S.view = 'review';
-  S.playing = setInterval(() => {
-    if (S.ply >= n()) return stopPlay();
-    S.ply++; S.explainOpen = false;
-    render(S.game.moves[S.ply - 1]);
-  }, 1300);
-  document.querySelector('[data-nav="play"]').textContent = '⏸';
-}
+function stopPlay() { if (S.playing) { clearInterval(S.playing); S.playing = null; } }
 
 // ---- Varianter -------------------------------------------------------------------
 
@@ -331,27 +408,37 @@ function playLine(which) {
     boards.push(b.pushed(m));
   }
   S.variation = { boards, sans, moves: pv.slice(0, sans.length), idx: 1, kind: which };
+  $('scroll').scrollTo({ top: 0, behavior: 'smooth' });
   render(S.variation.moves[0]);
+}
+
+function varStep(d) {
+  const v = S.variation, before = v.idx;
+  v.idx = Math.max(0, Math.min(v.moves.length, v.idx + d));
+  render(v.idx === before + 1 ? v.moves[v.idx - 1] : null);
 }
 
 function renderVariation(anim) {
   const v = S.variation;
+  layout({ evalbar: false });
   const m = v.idx > 0 ? v.moves[v.idx - 1] : null;
   draw(v.boards[v.idx], { last: m, anim, arrows: v.idx === 0 && v.moves.length ? [{ from: v.moves[0].from, to: v.moves[0].to, kind: v.kind === 'best' ? 'best' : 'threat' }] : [] });
-  let bar = `<div class="varbar"><button class="btn small" id="v-close">✕ Tillbaka</button>`;
+  let strip = '<button class="x" id="v-close">✕</button>';
   v.sans.forEach((s, k) => {
     const b = v.boards[k];
-    const num = b.turn ? `${b.fullmoveNumber}.` : k === 0 ? `${b.fullmoveNumber}…` : '';
-    bar += `<span class="vm${v.idx === k + 1 ? ' cur' : ''}" data-k="${k + 1}">${num}${esc(s)}</span>`;
+    const num = b.turn ? `<span class="n">${b.fullmoveNumber}.</span>` : k === 0 ? `<span class="n">${b.fullmoveNumber}…</span>` : '';
+    strip += `${num}<div class="mv${v.idx === k + 1 ? ' cur' : ''}" data-ply="${k + 1}">${esc(fig(s))}</div>`;
   });
-  bar += '</div>';
+  setStrip(strip, k => { v.idx = k; render(); });
+  $('v-close').onclick = () => { S.variation = null; render(); };
   const b = v.boards[Math.max(0, v.idx - 1)];
   const txt = m ? esc(describeMove(b, m)) + '.' : 'Startställningen för varianten.';
   const title = v.kind === 'best' ? 'Det bättre draget' : 'Motståndarens bästa svar';
-  $('panel').innerHTML = bar + `<div class="pad">${bubbleHtml(esc(title), txt.charAt(0).toUpperCase() + txt.slice(1))}
-    <p class="note">Bläddra i varianten med ‹ och ›. Tryck ✕ Tillbaka för att gå tillbaka till partiet.</p></div>`;
-  $('v-close').onclick = () => { S.variation = null; render(); };
-  $('panel').querySelectorAll('.vm').forEach(e => { e.onclick = () => { v.idx = +e.dataset.k; render(); }; });
+  setCoach(bubbleHtml(`<span class="t">${esc(title)}</span>`, txt.charAt(0).toUpperCase() + txt.slice(1)));
+  $('panel').innerHTML = '';
+  setBar([{ label: 'Tillbaka', icon: 'undo', fn: () => { S.variation = null; render(); } },
+    { label: 'Förra', icon: 'prev', disabled: v.idx === 0, fn: () => varStep(-1) },
+    v.idx >= v.moves.length ? { label: 'Klar', primary: true, fn: () => { S.variation = null; render(); } } : { label: 'Nästa', primary: true, fn: () => varStep(1) }]);
 }
 
 // ---- Försök igen ----------------------------------------------------------------
@@ -364,38 +451,40 @@ function startRetry() {
 
 function renderRetry() {
   const r = S.retry, info = S.plies[r.i];
+  layout({ evalbar: false, strip: false });
   const who = r.board.turn ? 'vit' : 'svart';
   const opts = { sel: r.sel, dots: r.sel !== null ? new Set(r.board.legalMoves().filter(m => m.from === r.sel).map(m => m.to)) : null };
-  let head = 'Försök igen', txt = `Hitta ett bättre drag för ${who} än ${esc(S.game.sans[r.i])}. Tryck på en pjäs och sedan på rutan.`;
-  let btns = '<button class="btn" id="r-hint">💡 Tips</button><button class="btn" id="r-show">Visa lösning</button><button class="btn ghost" id="r-back">Tillbaka</button>';
+  const back = { label: 'Tillbaka', icon: 'undo', fn: () => { S.retry = null; render(); } };
+  const show = { label: 'Visa lösning', icon: 'eye', fn: () => { r.solution = 'anim'; r.result = null; render(); } };
+  let head = 'Försök igen', txt = `Hitta ett bättre drag för ${who} än ${esc(fig(S.game.sans[r.i]))}.`, tone = '';
+  let items = [back, show, { label: 'Tips', icon: 'bulb', on: r.hint, fn: () => { r.hint = true; render(); toast('Den markerade pjäsen ska flytta.'); } }];
   let board = r.board;
   if (r.result) {
     const { move, ok, thinking, text } = r.result;
     board = r.board.pushed(move);
     opts.last = move; opts.tints = { [move.to]: ok ? 'good' : 'bad' }; opts.anim = r.result.anim ? move : null; r.result.anim = false;
     opts.dots = null; opts.sel = null;
-    if (thinking) { head = 'Kollar draget…'; txt = 'Stockfish tittar på ditt drag.'; btns = ''; } else {
-      head = ok ? `${icon('best')} Rätt!` : `${icon('mistake')} Inte riktigt`;
+    if (thinking) { head = 'Kollar draget…'; txt = 'Stockfish tittar på ditt drag.'; items = [back]; } else {
+      head = ok ? `${icon('best')}<span class="t">Rätt!</span>` : `${icon('mistake')}<span class="t">Inte riktigt</span>`;
+      tone = ok ? 'good' : 'bad';
       txt = text;
-      btns = ok ? '<button class="btn go" id="r-back">Fortsätt granskningen</button>'
-        : '<button class="btn go" id="r-again">↻ Försök igen</button><button class="btn" id="r-show">Visa lösning</button><button class="btn ghost" id="r-back">Tillbaka</button>';
+      opts.badges = [{ sq: move.to, kind: ok ? 'correct' : 'wrong' }];
+      items = ok ? [{ label: 'Fortsätt', primary: true, fn: back.fn }]
+        : [back, show, { label: 'Försök igen', primary: true, fn: () => { r.result = null; r.sel = null; render(); } }];
     }
   }
-  if (r.hint && !r.result) opts.tints = { [info.best.from]: 'good' };
+  if (r.hint && !r.result) opts.tints = { [info.best.from]: 'hint' };
   if (r.solution) {
     board = r.board.pushed(info.best);
     opts.last = info.best; opts.anim = r.solution === 'anim' ? info.best : null; r.solution = true;
     opts.arrows = []; opts.tints = { [info.best.to]: 'good' }; opts.dots = null; opts.sel = null;
-    head = `${icon('best')} Lösningen`; txt = esc(r.board.san(info.best)) + ': ' + esc(describeMove(r.board, info.best)) + '.';
-    btns = '<button class="btn go" id="r-back">Tillbaka till granskningen</button>';
+    head = `${icon('best')}<span class="t">Lösningen</span>`; txt = esc(fig(r.board.san(info.best))) + ': ' + esc(describeMove(r.board, info.best)) + '.';
+    items = [{ label: 'Tillbaka till granskningen', primary: true, fn: back.fn }];
   }
   draw(board, opts);
-  $('panel').innerHTML = `<div class="pad">${bubbleHtml(head, txt)}<div class="actions">${btns}</div></div>`;
-  const on = (id, f) => { const el = $(id); if (el) el.onclick = f; };
-  on('r-back', () => { S.retry = null; render(); });
-  on('r-show', () => { r.solution = 'anim'; r.result = null; render(); });
-  on('r-hint', () => { r.hint = true; render(); toast('Den markerade pjäsen ska flytta.'); });
-  on('r-again', () => { r.result = null; r.sel = null; render(); });
+  setCoach(bubbleHtml(head.startsWith('<') ? head : `<span class="t">${head}</span>`, txt, null, tone));
+  $('panel').innerHTML = '';
+  setBar(items);
 }
 
 async function retryMove(m) {
@@ -403,7 +492,7 @@ async function retryMove(m) {
   if (!r.board.isLegal(m)) return;
   r.sel = null; r.tries++;
   if (m.eq(info.best)) {
-    r.result = { move: m, ok: true, anim: true, text: `${esc(r.board.san(m))} är det bästa draget. ${esc(describeMove(r.board, m))}.` };
+    r.result = { move: m, ok: true, anim: true, text: `${esc(fig(r.board.san(m)))} är det bästa draget. ${esc(describeMove(r.board, m))}.` };
     return render();
   }
   r.result = { move: m, ok: false, thinking: true, anim: true };
@@ -415,12 +504,12 @@ async function retryMove(m) {
   const sign = r.board.turn ? 1 : -1;
   const loss = res ? winPct(info.cp_before * sign) - winPct(res.cp * sign) : 99;
   if (loss < 3) {
-    r.result = { move: m, ok: true, text: `${esc(r.board.san(m))} fungerar också bra! Motorns förstaval var ${esc(r.board.san(info.best))}.` };
+    r.result = { move: m, ok: true, text: `${esc(fig(r.board.san(m)))} fungerar också bra! Motorns förstaval var ${esc(fig(r.board.san(info.best)))}.` };
   } else {
     let why = 'Det är bättre än i partiet, men det finns ett ännu starkare drag.';
     if (res && res.pv.length) {
       const reply = Move.fromUci(res.pv[0]);
-      if (after.isLegal(reply)) why = `Motståndaren kan svara ${esc(after.san(reply))}: ${esc(describeMove(after, reply))}.`;
+      if (after.isLegal(reply)) why = `Motståndaren kan svara ${esc(fig(after.san(reply)))}: ${esc(describeMove(after, reply))}.`;
     }
     r.result = { move: m, ok: false, text: why };
   }
@@ -483,7 +572,7 @@ boardEl.addEventListener('pointerup', e => {
   }
   const dx = e.clientX - t.x;
   if (Math.abs(dx) > 40 && S.game) {
-    if (S.variation) { S.variation.idx = Math.max(0, Math.min(S.variation.moves.length, S.variation.idx + (dx < 0 ? 1 : -1))); render(dx < 0 ? S.variation.moves[S.variation.idx - 1] : null); } else go(S.ply + (dx < 0 ? 1 : -1));
+    if (S.variation) varStep(dx < 0 ? 1 : -1); else go(S.ply + (dx < 0 ? 1 : -1));
   }
 });
 const promo = (b, from, to) => {
@@ -496,46 +585,50 @@ const promo = (b, from, to) => {
 
 function graphSvg() {
   const pts = [S.plies[0].cp_before, ...S.plies.map(p => p.cp_after)].map(winPct);
-  const w = 400, h = 70, dx = w / Math.max(1, pts.length - 1);
+  const w = 400, h = 96, dx = w / Math.max(1, pts.length - 1);
   const line = pts.map((v, k) => `${(k * dx).toFixed(1)},${(h - v / 100 * h).toFixed(1)}`).join(' ');
   let dots = '';
   S.plies.forEach((p, i) => {
     if (['inaccuracy', 'mistake', 'miss', 'blunder', 'great', 'brilliant'].includes(p.cls)) {
-      dots += `<circle cx="${((i + 1) * dx).toFixed(1)}" cy="${(h - pts[i + 1] / 100 * h).toFixed(1)}" r="3.6" fill="${CLASS_STYLE[p.cls][0]}" stroke="#262522" stroke-width="1"/>`;
+      dots += `<circle cx="${((i + 1) * dx).toFixed(1)}" cy="${(h - pts[i + 1] / 100 * h).toFixed(1)}" r="5" fill="${CLASS_STYLE[p.cls][0]}"/>`;
     }
   });
   return `<svg class="graph" id="graph" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
-    <polygon points="0,${h} ${line} ${w},${h}" fill="#fff"/><line x1="0" y1="${h / 2}" x2="${w}" y2="${h / 2}" stroke="#888" stroke-dasharray="3 3" stroke-width=".8"/>${dots}</svg>`;
+    <polygon points="0,${h} ${line} ${w},${h}" fill="#fff"/><line x1="0" y1="${h / 2}" x2="${w}" y2="${h / 2}" stroke="#8b8987" stroke-width="1.2"/>${dots}</svg>`;
 }
 
 function renderSummary() {
   const s = S.sum, h = S.game.headers;
-  const name = c => esc((c ? h.White : h.Black) || (c ? 'Vit' : 'Svart')) + (S.me === c ? ' (du)' : '');
-  let t = `<div class="pad sum">${bubbleHtml('Partigranskning', esc(s.line), fmtEval(S.plies[S.plies.length - 1].cp_after))}${graphSvg()}<table>`;
-  t += `<tr><td class="lbl">Spelare</td><td class="n">${name(true)}</td><td class="n">${name(false)}</td></tr>`;
-  t += `<tr class="big"><td class="lbl">Precision</td><td class="n">${S.acc.true?.toFixed(1) ?? '–'}</td><td class="n">${S.acc.false?.toFixed(1) ?? '–'}</td></tr>`;
-  t += `<tr class="big"><td class="lbl">Partirating</td><td class="n">≈ ${s.ratings.true ?? '–'}</td><td class="n">≈ ${s.ratings.false ?? '–'}</td></tr>`;
-  t += '<tr class="sep"><td colspan="3"></td></tr>';
+  setCoach(bubbleHtml(null, esc(s.line)));
+  const name = c => esc((c ? h.White : h.Black) || (c ? 'Vit' : 'Svart'));
+  const res = h.Result || '*';
+  const won = c => (c ? res === '1-0' : res === '0-1');
+  let t = `<div class="sum">${graphSvg()}`;
+  t += `<div class="srow players"><div>Spelare</div>${[true, false].map(c => `<div class="who"><span class="nm">${name(c)}${S.me === c ? ' (du)' : ''}</span>`
+    + `<div class="pic${won(c) ? ' win' : ''}"><img src="pieces/k${c ? 'l' : 'd'}.png" alt=""></div></div>`).join('')}</div>`;
+  t += `<div class="srow boxes"><div>Precision</div><div class="box w">${S.acc.true?.toFixed(1) ?? '–'}</div><div class="box b">${S.acc.false?.toFixed(1) ?? '–'}</div></div>`;
+  t += '<div class="sline"></div>';
   for (const cls of ORDER) {
     const c = CLASS_STYLE[cls][0];
-    t += `<tr><td><span class="cls" style="color:${c}">${icon(cls)}${CLASS_SV[cls][1]}</span></td>`
-      + `<td class="n" style="color:${c}">${s.counts.true[cls] || 0}</td><td class="n" style="color:${c}">${s.counts.false[cls] || 0}</td></tr>`;
+    t += `<div class="srow"><div>${CLASS_SV[cls][1]}</div><div class="c" style="color:${c}">${s.counts.true[cls] || 0}</div><div class="m">${icon(cls)}</div>`
+      + `<div class="c" style="color:${c}">${s.counts.false[cls] || 0}</div></div>`;
   }
-  t += '<tr class="sep"><td colspan="3"></td></tr>';
+  t += '<div class="sline"></div>';
+  t += `<div class="srow boxes"><div>Partirating</div><div class="box w">${s.ratings.true ?? '–'}</div><div class="box b">${s.ratings.false ?? '–'}</div></div>`;
+  t += '<div class="sline"></div>';
   for (const [k, label] of PHASES) {
-    const g = c => (s.phases[c][k] ? `<span class="grade" style="background:${s.phases[c][k][2]}">${s.phases[c][k][3]} ${s.phases[c][k][1]}</span>` : '–');
-    t += `<tr><td class="lbl">${label}</td><td class="n">${g(true)}</td><td class="n">${g(false)}</td></tr>`;
+    const g = c => (s.phases[c][k] ? `<span class="icon" title="${s.phases[c][k][1]}" style="background:${s.phases[c][k][2]}">${s.phases[c][k][3]}</span>` : '<span style="color:#6b6966">–</span>');
+    t += `<div class="srow phase"><div>${label}</div><div class="c">${g(true)}</div><div class="c">${g(false)}</div></div>`;
   }
-  t += '</table>';
   if (s.skills.length) {
-    t += `<div class="note">Färdighetspoäng: ⭐ +${s.skills.length}</div><div class="skills">`
+    t += '<div class="sline"></div>'
+      + `<div class="note">Färdighetspoäng: ⭐ +${s.skills.length}</div><div class="skills">`
       + s.skills.map(([, k]) => `<span class="skill" title="${esc(SKILLS[k][1])}">⭐ ${SKILLS[k][0]}</span>`).join('') + '</div>';
   }
   t += '<p class="note">Partiratingen är en uppskattning utifrån precisionen i just det här partiet.</p></div>';
-  t += '<div class="sticky-go"><button class="btn primary wide" id="s-go">Starta granskning</button></div>';
   $('panel').innerHTML = t;
-  $('panel').scrollTop = 0;
-  $('s-go').onclick = () => { S.view = 'review'; go(S.ply > 0 ? S.ply : 1); };
+  $('scroll').scrollTop = 0;
+  setBar([{ label: 'Starta granskning', primary: true, fn: () => { S.view = 'review'; go(S.ply > 0 ? S.ply : 1); } }]);
   $('graph').onclick = e => {
     const r = e.currentTarget.getBoundingClientRect();
     S.view = 'review';
@@ -590,7 +683,7 @@ function openFetch() {
   sheet('Hämta parti', `
     <p class="hint">Dina användarnamn på chess.com. Flera konton går bra, skriv dem med komma emellan.</p>
     <div class="row"><input class="field" id="f-names" value="${esc(names)}" placeholder="t.ex. konto1, konto2" autocapitalize="off" autocorrect="off" spellcheck="false">
-    <button class="btn go" id="f-go" style="background:var(--green)">Hämta</button></div>
+    <button class="btn go" id="f-go">Hämta</button></div>
     <div id="f-err" class="err"></div><div class="games" id="f-list"></div>
     <p class="hint" style="margin-top:18px">Eller klistra in partiets PGN (eller bara dragen):</p>
     <textarea class="field" id="f-pgn" placeholder="1. e4 e5 2. Nf3 …"></textarea>
@@ -615,7 +708,7 @@ function openFetch() {
       const nm = p => (lower.includes(p.username.toLowerCase()) ? `<b>${esc(p.username)}</b>` : esc(p.username)) + ` (${p.rating})`;
       const tc = { bullet: 'Bullet', blitz: 'Blixt', rapid: 'Snabb', daily: 'Daglig' }[g.tc] || g.tc;
       return `<div class="game" data-k="${k}"><span class="res" style="background:${bg}">${ch}</span>
-        <div class="who"><div>♔ ${nm(g.white)}</div><div>♚ ${nm(g.black)}</div></div><div class="meta">${tc}<br>${date}</div></div>`;
+        <div class="who2"><div>♔︎ ${nm(g.white)}</div><div>♚︎ ${nm(g.black)}</div></div><div class="meta">${tc}<br>${date}</div></div>`;
     }).join('');
     list.querySelectorAll('.game').forEach(el => { el.onclick = () => { closeSheet(); analyse(games[+el.dataset.k].pgn); }; });
   };
@@ -640,10 +733,12 @@ async function analyse(pgn, quiet = false) {
   if (!pos || pos.length !== game.boards.length) {
     $('busy').hidden = false;
     $('busy-text').textContent = 'Startar Stockfish…';
+    $('busy-pct').textContent = '0 %';
     $('busy-bar').style.width = '0%';
     try {
       pos = await getEngine().analysePositions(game.boards, (k, total) => {
-        $('busy-text').textContent = `Stockfish analyserar drag ${Math.min(k, total - 1)} av ${total - 1}…`;
+        $('busy-text').textContent = `Stockfish analyserar drag ${Math.min(k, total - 1)} av ${total - 1}`;
+        $('busy-pct').textContent = Math.round(k / total * 100) + ' %';
         $('busy-bar').style.width = (k / total * 100) + '%';
       }, MS_PER_POS);
     } catch (e) {
@@ -658,18 +753,18 @@ async function analyse(pgn, quiet = false) {
   const names = store.get('names', []).map(x => x.toLowerCase());
   const w = (game.headers.White || '').toLowerCase(), b = (game.headers.Black || '').toLowerCase();
   const me = names.includes(w) ? true : names.includes(b) ? false : null;
-  S.tab = 'review';
   overlay(null);
   Object.assign(S, { game, plies, acc, me, sum: summarize(game, plies, acc, me), ply: 0, flipped: me === false,
-    view: 'summary', explainOpen: false, step: 'move', variation: null, retry: null, cache: {} });
+    view: 'summary', explainOpen: false, step: 'move', showBest: false, variation: null, retry: null, cache: {} });
   store.set('last', pgn);
   if (me !== null) { recordGame(game, plies, acc, me, S.sum); collectMistakes(game, plies, me); }
   placeSquares();
+  if (!quiet) { leaveTab(); S.tab = 'review'; }
   render();
-  if (!quiet) $('panel').scrollTop = 0;
+  if (!quiet) $('scroll').scrollTop = 0;
 }
 
-// ---- Träning -----------------------------------------------------------------------
+// ---- Träning och coach -------------------------------------------------------------
 
 let trainer = null, coach = null, dataLoading = null;
 const act = () => (S.tab === 'coach' ? coach : S.tab === 'train' ? trainer : null);
@@ -680,22 +775,44 @@ function drawTrain(anim) {
 }
 
 function trainPanel(keepScroll) {
-  const panel = $('panel');
-  const top = panel.scrollTop;
-  panel.innerHTML = act().panelHtml();
-  act().bind(panel);
-  if (keepScroll) panel.scrollTop = top;
-  else if (S.tab === 'coach' && coach.cg) panel.scrollTop = 0;
+  const a = act();
+  const tile = HOME_TILES.find(([k]) => k === a.mode);
+  const title = S.tab === 'coach' ? 'Spela med coach' : tile ? tile[2] : 'Träning';
+  header(title);
+  const cp = a.evalCp ? a.evalCp() : null;
+  const strip = a.stripHtml ? a.stripHtml() : '';
+  layout({ board: a.boardShown(), evalbar: S.tab === 'coach' && !!a.cg, strip: !!strip });
+  if (S.tab === 'coach') setEval(cp);
+  setCoach(a.coachHtml());
+  if (strip) setStrip(strip, null);
+  $('captured').innerHTML = S.tab === 'coach' && a.cg ? capturedHtml(a.board, a.userColor) : '';
+  const panel = $('panel'), sc = $('scroll');
+  const top = sc.scrollTop;
+  panel.innerHTML = a.panelHtml();
+  const custom = a.barHtml ? a.barHtml() : null;
+  if (custom !== null) $('bar').innerHTML = custom;
+  else setBar(a.actions.map(([label, fn, style]) => (fn ? { label, fn, primary: style === 'primary', danger: style === 'danger' } : { ask: label })));
+  a.bind($('app'));
+  if (keepScroll) sc.scrollTop = top;
 }
 
-// Spelarrader i coach-läget: coachen överst, du nederst (eller tvärtom när brädet är vänt).
-let coachPlayers = null;
-function coachBars() {
-  if (S.tab !== 'coach') return;
-  const p = coachPlayers;
-  const row = (name, white) => `<span class="av"><img src="pieces/k${white ? 'l' : 'd'}.png" alt=""></span><b>${esc(name)}</b>`;
-  $('bar-top').innerHTML = p ? row(p.coach, !p.youWhite) : '';
-  $('bar-bottom').innerHTML = p ? row(p.you, p.youWhite) : '';
+// Tagna pjäser: dina byten till vänster, coachens till höger, och materialövervikten.
+function capturedHtml(board, you) {
+  const start = { 1: 8, 2: 2, 3: 2, 4: 2, 5: 1 }, val = { 1: 1, 2: 3, 3: 3, 4: 5, 5: 9 };
+  const left = { true: { ...start }, false: { ...start } };
+  for (const p of board.squares()) if (p && p.type < 6) left[p.color][p.type]--;
+  const side = color => {
+    let h = '', pts = 0;
+    for (const t of [1, 2, 3, 4, 5]) {
+      const k = Math.max(0, left[color][t]);
+      pts += k * val[t];
+      for (let i = 0; i < k; i++) h += `<img src="pieces/${'_pnbrqk'[t]}${color ? 'l' : 'd'}.png" alt="">`;
+    }
+    return [h, pts];
+  };
+  const [mine, gotMine] = side(!you), [theirs, gotTheirs] = side(you);
+  const diff = gotMine - gotTheirs;
+  return `<span>${mine}${diff > 0 ? `<b>+${diff}</b>` : ''}</span><span>${theirs}${diff < 0 ? `<b>+${-diff}</b>` : ''}</span>`;
 }
 
 // Ruta ovanpå brädet, t.ex. resultatet när ett coach-parti är slut.
@@ -742,7 +859,7 @@ function celebrate() {
 // Hämtar och analyserar dina senaste partier, för Mina misstag och statistiken.
 async function batchAnalyse(limit, progress) {
   const names = store.get('names', []);
-  if (!names.length) throw new Error('Hämta ett parti under Genomgång först, så vet jag vilka dina konton är.');
+  if (!names.length) throw new Error('Hämta ett parti under Partigranskning först, så vet jag vilka dina konton är.');
   const lower = names.map(x => x.toLowerCase());
   const all = [];
   for (const nm of names) { try { all.push(...await recentGames(nm, limit)); } catch { /* nästa konto */ } }
@@ -780,8 +897,8 @@ function loadData() {
         analyse: (fen, ms) => getEngine().analyse(fen, ms),
         search: (fen, opts) => getEngine().search(fen, opts),
         batchAnalyse, myName, myRating, overlay,
-        players: p => { coachPlayers = p; coachBars(); },
-        toReview: pgn => { S.tab = 'review'; analyse(pgn); },
+        players: () => {},
+        toReview: pgn => analyse(pgn),
       };
       trainer = new Trainer(base, { training, puzzles, themes });
       coach = new Coach(base, { training, puzzles, themes });
@@ -790,55 +907,62 @@ function loadData() {
   return dataLoading;
 }
 
-async function openTab(tab) {
+// Lämnar den vy som är öppen: stoppar klockor och pågående motoranrop i träningen.
+function leaveTab() {
   stopPlay();
   if (act()) act().token++;
   if (trainer) trainer.stopClock();
   overlay(null);
+}
+
+async function openTab(tab, mode = null) {
+  leaveTab();
   S.tab = tab;
-  if (tab === 'review') return render();
-  const first = !trainer;
-  if (first) {
-    $('app').classList.toggle('train', tab === 'train');
-    $('app').classList.toggle('coach', tab === 'coach');
-    $('app').classList.remove('summary');
-    document.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
-    $('panel').innerHTML = '<div class="pad"><p class="hint">Laddar…</p></div>';
+  $('scroll').scrollTop = 0;
+  if (tab === 'review' || tab === 'home') return render();
+  $('app').classList.remove('v-home');
+  if (!trainer) {
+    header(tab === 'coach' ? 'Spela med coach' : 'Träning');
+    layout({ board: false });
+    setCoach(bubbleHtml(null, 'Laddar…'));
+    $('panel').innerHTML = '';
+    $('bar').innerHTML = '';
     await loadData();
     if (S.tab !== tab) return;
   }
-  if (!act().mode) act().setMode(tab === 'coach' ? 'coach' : 'plan');
-  else {
-    render();
-    if (tab === 'coach' && coach.result) coach.showResult();
-    if (tab === 'coach' && coach.cg && !coach.cg.over && !coach.cg.waiting) coach.nextTurn();
+  if (tab === 'train') return trainer.setMode(mode || trainer.mode || 'plan');
+  if (!coach.mode) return coach.setMode('coach');
+  render();
+  if (coach.result) coach.showResult();
+  if (coach.cg && !coach.cg.over && !coach.cg.waiting) coach.nextTurn();
+}
+
+function goBack() {
+  if (S.tab === 'review') {
+    if (S.retry) { S.retry = null; return render(); }
+    if (S.variation) { S.variation = null; return render(); }
+    if (S.game && S.view !== 'summary') { S.view = 'summary'; return render(); }
   }
+  openTab('home');
 }
 
 // ---- Knappar ---------------------------------------------------------------------
 
-document.querySelectorAll('[data-tab]').forEach(b => { b.onclick = () => openTab(b.dataset.tab); });
-
-$('btn-fetch').onclick = openFetch;
-$('navbar').onclick = e => {
-  const b = e.target.closest('button');
+$('h-back').onclick = goBack;
+$('stripwrap').addEventListener('click', e => {
+  const b = e.target.closest('[data-nav]');
   if (!b) return;
-  const a = b.dataset.nav;
-  if (a === 'flip') { S.flipped = !S.flipped; placeSquares(); return render(); }
-  if (S.variation) {
-    const v = S.variation, before = v.idx;
-    v.idx = { first: 0, prev: v.idx - 1, next: v.idx + 1, last: v.moves.length, play: v.idx + 1 }[a];
-    v.idx = Math.max(0, Math.min(v.moves.length, v.idx));
-    return render(v.idx === before + 1 ? v.moves[v.idx - 1] : null);
-  }
-  if (S.retry || !S.game) return;
-  if (a === 'play') return togglePlay();
-  go({ first: 0, prev: S.ply - 1, next: S.ply + 1, last: n() }[a]);
-};
+  const d = b.dataset.nav === 'next' ? 1 : -1;
+  if (S.tab !== 'review') { const st = $('strip'); st.scrollBy({ left: d * st.clientWidth * 0.7, behavior: 'smooth' }); return; }
+  if (S.variation) return varStep(d);
+  if (S.game && !S.retry) go(S.ply + d);
+});
+document.querySelectorAll('.sarrow').forEach(b => { b.innerHTML = svgIcon(b.dataset.nav); });
 document.addEventListener('keydown', e => {
-  if (e.target.matches('input, textarea')) return;
-  const map = { ArrowLeft: 'prev', ArrowRight: 'next', Home: 'first', End: 'last' };
-  if (map[e.key]) document.querySelector(`[data-nav="${map[e.key]}"]`).click();
+  if (e.target.matches('input, textarea, select') || S.tab !== 'review' || !S.game || S.retry) return;
+  const d = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
+  if (!d) return;
+  if (S.variation) varStep(d); else go(S.ply + d);
 });
 
 placeSquares();

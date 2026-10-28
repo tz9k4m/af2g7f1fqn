@@ -72,22 +72,20 @@ export class Coach extends Trainer {
       [`Balanserad (≈${r})`, 'En jämn match att spela medan du lär dig', r],
       [`Utmanande (≈${r + 300})`, 'Ett svårare parti som sporrar dig att lära dig nya saker', r + 300],
     ].concat(LEVELS.map(([elo, name]) => [`${name} (${elo})`, null, elo]));
-    this.showList(this.choices.map(([a, b]) => [a, b]), k => { this.choice = k; this.list.selected = k; this.host.panel(true); }, this.choice);
     this.host.players(null);
     this.setBubble('Välkommen!', 'Vi spelar ett parti så lär jag dig strategi på vägen. Välj nivå och färg när du är redo.');
     this.write([['Så fungerar det', 'h'],
       ['Jag kommenterar dragen medan vi spelar och visar direkt om ditt drag var bra eller dåligt.', 'li'],
       ['Gör du en blunder stoppar jag och visar varför. Då kan du försöka igen eller fortsätta.', 'li'],
       ['💡 Tips ger en ledtråd i tre steg, ↶ Ångra tar tillbaka ett drag.', 'li'],
-      ['Efter partiet kan du gå igenom det under Genomgång.', 'li'],
+      ['Efter partiet kan du gå igenom det i Partigranskning.', 'li'],
       [`Hobby, Balanserad och Utmanande utgår från din rating (${r}).`, 'muted']]);
-    this.setActions([['Spela som vit', () => this.coachNew(true), 'primary'],
-      ['Slumpa färg', () => this.coachNew(Math.random() < 0.5)], ['Spela som svart', () => this.coachNew(false)]]);
+    this.colorPick ??= 'r';
+    this.setActions([]);
   }
 
   coachNew(color) {
     const elo = this.choices[this.choice][2];
-    this.hideList();
     this.result = null;
     this.host.overlay(null);
     this.token++;
@@ -104,7 +102,7 @@ export class Coach extends Trainer {
     this.nextTurn();
   }
   gameActions() {
-    this.setActions([['⚑ Ge upp', () => this.coachResign()], ['💡 Tips', () => this.coachHint(), 'primary'], ['↶ Ångra', () => this.coachTakeback()]]);
+    this.setActions([['Ge upp', () => this.coachResign()], ['Tips', () => this.coachHint()], ['Ångra', () => this.coachTakeback()]]);
   }
 
   // Sätter ställningen och sparar den i partiets historik.
@@ -429,15 +427,15 @@ export class Coach extends Trainer {
     for (const cls of ['great', 'best', 'excellent', 'mistake', 'blunder']) {
       if (!counts[cls] && (cls === 'great' || cls === 'mistake')) continue;
       const [c, sym] = CLASS_STYLE[cls];
-      cells += `<div class="rc" style="color:${c}"><b>${sym} ${counts[cls] || 0}</b><span>${CLASS_SV[cls][1]}</span></div>`;
+      cells += `<div class="rc" style="color:${c}"><b><span class="icon" style="background:${c}">${sym}</span>${counts[cls] || 0}</b><span>${CLASS_SV[cls][1]}</span></div>`;
     }
-    this.host.overlay(`<div class="result"><button class="rx" data-ract="close">✕</button><h3>${esc(title)}</h3><p class="rsub">${esc(sub)}</p>
-      <p class="rline">${esc(line)}</p><div class="rcells">${cells}</div>
-      <button class="btn primary wide" data-ract="review">Partigranskning</button><button class="btn wide" data-ract="new">Nytt parti</button></div>`,
+    this.host.overlay(`<div class="result"><button class="rx" data-ract="close">✕</button><div class="rtop"><h3>${esc(title)}</h3><p class="rsub">${esc(sub)}</p></div>
+      <div class="rbody"><div class="rcoach"><div class="avatar"><img src="pieces/nl.png" alt=""></div><p class="rline">${esc(line)}</p></div><div class="rcells">${cells}</div>
+      <button class="gbtn" data-ract="review">Partigranskning</button><button class="gbtn grey" data-ract="new">Nytt parti</button></div></div>`,
     { review: () => this.toReview(), new: () => this.start_coach(), close: () => this.host.overlay(null) });
   }
 
-  // Lämnar över partiet till Genomgång, som analyserar det med de vanliga förklaringarna.
+  // Lämnar över partiet till Partigranskning, som analyserar det med de vanliga förklaringarna.
   toReview() {
     const h = this.cg.history;
     const me = this.host.myName() || 'Du', coach = `Coach (${this.cg.elo})`;
@@ -455,45 +453,55 @@ export class Coach extends Trainer {
     this.host.toReview(pgn);
   }
 
-  // ---------- HTML för panelen ----------
-  panelHtml() {
-    let h = '<div class="pad"><div class="chat">';
-    this.msgs.forEach((m, k) => {
+  // ---------- HTML: pratbubblor ovanför brädet, dragraden och knappraden ----------
+  coachHtml() {
+    return this.msgs.map((m, k) => {
       const newest = k === this.msgs.length - 1;
-      h += `<div class="coachrow msg" data-id="${m.id}">${k === 0 ? '<div class="coachav"><img src="pieces/kl.png" alt=""></div>' : '<div class="coachav ghost"></div>'}
-        <div class="bubble ${m.tone || ''}${newest && !m.typed ? ' typing' : ''}">${m.head ? `<div class="head">${esc(m.head)}</div>` : ''}<div class="txt" data-full="${esc(m.body || '')}">${esc(m.typed || !newest ? m.body || '' : '')}</div></div></div>`;
-    });
-    h += '</div>';
-    if (this.actions.length) {
-      h += '<div class="actions">' + this.actions.map(([label, fn, style], k) => (fn ? `<button class="btn${style === 'primary' ? ' go' : style === 'danger' ? ' danger' : ''}" data-act="${k}">${esc(label)}</button>`
-        : `<p class="ask">${esc(label)}</p>`)).join('') + '</div>';
-    }
-    if (this.list) {
-      h += '<div class="tlist">' + this.list.entries.map(([label, sub], k) => `<div class="titem${k === this.list.selected ? ' sel' : ''}" data-item="${k}"><b>${esc(label)}</b>${sub ? `<span>${esc(sub)}</span>` : ''}</div>`).join('') + '</div>';
-    }
-    if (this.cg) h += this.movesHtml();
-    else h += '<div class="trows">' + this.rows.map(([t, tag]) => (tag === 'h' ? `<h4>${esc(t)}</h4>` : `<p class="${tag || ''}">${esc(t)}</p>`)).join('') + '</div>';
-    return h + '</div>';
+      return `<div class="bubble msg ${m.tone || ''}${newest && !m.typed ? ' typing' : ''}" data-id="${m.id}">${m.head ? `<div class="head"><span class="t">${esc(m.head)}</span></div>` : ''}`
+        + `<div class="txt" data-full="${esc(m.body || '')}">${esc(m.typed || !newest ? m.body || '' : '')}</div></div>`;
+    }).join('');
   }
-  movesHtml() {
+  boardShown() { return true; }
+  evalCp() {
+    const cp = this.cg ? this.cg.last_cp : null;
+    return cp === null || cp === undefined ? null : (this.userColor ? cp : -cp);
+  }
+  panelHtml() {
+    if (this.cg) return this.cg.opening ? `<p class="opening">${esc(this.cg.opening)}</p>` : '';
+    return '<div class="pad"><div class="trows">' + this.rows.map(([t, tag]) => (tag === 'h' ? `<h4>${esc(t)}</h4>` : `<p class="${tag || ''}">${esc(t)}</p>`)).join('') + '</div></div>';
+  }
+  // Före partiet: nivå i en meny, färg med tre rutor och en stor Spela-knapp.
+  barHtml() {
+    if (this.cg) return null;
+    const opts = this.choices.map(([label], k) => `<option value="${k}"${k === this.choice ? ' selected' : ''}>${esc(label)}</option>`).join('');
+    const col = (k, inner, title) => `<button class="${k}${this.colorPick === k ? ' on' : ''}" data-color="${k}" aria-label="${title}">${inner}</button>`;
+    return `<div class="pick"><select id="c-level" aria-label="Nivå">${opts}</select><div class="colors">`
+      + col('w', '<img src="pieces/kl.png" alt="">', 'Spela som vit') + col('r', '?', 'Slumpa färg') + col('b', '<img src="pieces/kd.png" alt="">', 'Spela som svart')
+      + '</div></div><button class="gbtn full" id="c-play">Spela</button>';
+  }
+  stripHtml() {
+    if (!this.cg) return '';
     const h = this.cg.history;
-    let out = `<div class="cmoves"><div class="copening">${esc(this.cg.opening || 'Startställning')}</div><div class="cgrid">`;
+    let out = '';
     for (let k = 0; k + 1 < h.length; k++) {
       const b = h[k];
       const m = h[k + 1].stack[h[k + 1].stack.length - 1];
-      if (b.turn || k === 0) out += `<span class="n">${b.fullmoveNumber}.</span>` + (!b.turn ? '<span>…</span>' : '');
+      if (b.turn || k === 0) out += `<span class="n">${b.fullmoveNumber}.${b.turn ? '' : '…'}</span>`;
       const san = b.san(m);
       const fig = FIGURINE[san[0]];
       const cls = this.cg.classes[k];
-      const mark = ['brilliant', 'great', 'inaccuracy', 'mistake', 'miss', 'blunder'].includes(cls) ? `<i style="color:${CLASS_STYLE[cls][0]}">${CLASS_STYLE[cls][1]}</i> ` : '';
+      const mark = ['brilliant', 'great', 'inaccuracy', 'mistake', 'miss', 'blunder'].includes(cls) ? `<span class="icon" style="background:${CLASS_STYLE[cls][0]}">${CLASS_STYLE[cls][1]}</span>` : '';
       const col = ['inaccuracy', 'mistake', 'blunder', 'miss'].includes(cls) ? ` style="color:${CLASS_STYLE[cls][0]}"` : '';
-      out += `<span${col}>${mark}${esc(fig ? fig + san.slice(1) : san)}</span>`;
+      out += `<div class="mv${k + 2 === h.length ? ' cur' : ''}"${col}>${mark}${esc(fig ? fig + '︎' + san.slice(1) : san)}</div>`;
     }
-    return out + '</div></div>';
+    return out;
   }
   bind(root) {
-    root.querySelectorAll('[data-act]').forEach(e => { e.onclick = () => this.actions[+e.dataset.act][1](); });
-    root.querySelectorAll('[data-item]').forEach(e => { e.onclick = () => this.list.onPick(+e.dataset.item); });
+    const level = root.querySelector('#c-level');
+    if (level) level.onchange = () => { this.choice = +level.value; };
+    root.querySelectorAll('[data-color]').forEach(e => { e.onclick = () => { this.colorPick = e.dataset.color; this.host.panel(true); }; });
+    const play = root.querySelector('#c-play');
+    if (play) play.onclick = () => this.coachNew(this.colorPick === 'w' ? true : this.colorPick === 'b' ? false : Math.random() < 0.5);
     // Den senaste bubblan skrivs fram bokstav för bokstav, som när coachen pratar.
     const el = root.querySelector('.bubble.typing .txt');
     const msg = this.msgs[this.msgs.length - 1];

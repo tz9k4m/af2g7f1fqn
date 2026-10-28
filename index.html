@@ -18,27 +18,28 @@
 <body>
 <div id="app">
   <header class="top">
-    <div class="tabs"><button data-tab="review" class="on">★ Genomgång</button><button data-tab="train">🎯 Träning</button><button data-tab="coach">♞ Coach</button></div>
-    <button id="btn-fetch" class="btn small">Hämta parti</button>
+    <button class="hbtn" id="h-back" aria-label="Tillbaka"></button>
+    <h1 id="h-title">Schackreview</h1>
+    <div class="hright" id="h-right"></div>
   </header>
 
-  <div class="player" id="bar-top"></div>
-  <div class="board-row">
-    <div class="evalbar" id="evalbar"><div class="fill" id="evalfill"></div></div>
-    <div class="board" id="board"></div>
+  <div class="scroll" id="scroll">
+    <section class="home" id="home"></section>
+    <div class="stage" id="stage">
+      <div class="evalh" id="evalh"><div class="fill" id="evalfill"></div><span class="etxt" id="evaltxt"></span></div>
+      <div class="coachbox" id="coachbox"></div>
+      <div class="board" id="board"></div>
+      <div class="captured" id="captured"></div>
+      <div class="stripwrap" id="stripwrap">
+        <button class="sarrow" data-nav="prev" aria-label="Förra draget"></button>
+        <div class="strip" id="strip"></div>
+        <button class="sarrow" data-nav="next" aria-label="Nästa drag"></button>
+      </div>
+    </div>
+    <main id="panel"></main>
   </div>
-  <div class="player" id="bar-bottom"></div>
 
-  <main id="panel"></main>
-
-  <nav class="navbar" id="navbar">
-    <button data-nav="first" aria-label="Första draget">⏮</button>
-    <button data-nav="prev" aria-label="Förra draget">‹</button>
-    <button data-nav="play" aria-label="Spela upp">▶</button>
-    <button data-nav="next" aria-label="Nästa drag">›</button>
-    <button data-nav="last" aria-label="Sista draget">⏭</button>
-    <button data-nav="flip" aria-label="Vänd brädet">⇅</button>
-  </nav>
+  <nav class="actionbar" id="bar"></nav>
 </div>
 
 <div class="sheet" id="sheet" hidden>
@@ -50,9 +51,9 @@
 
 <div class="overlay" id="busy" hidden>
   <div class="busy-card">
-    <img src="pieces/kl.png" alt="" class="spin">
-    <div id="busy-text">Stockfish analyserar…</div>
+    <div class="busy-pct" id="busy-pct">0 %</div>
     <div class="progress"><div id="busy-bar"></div></div>
+    <div class="busy-text" id="busy-text">Stockfish analyserar…</div>
   </div>
 </div>
 
