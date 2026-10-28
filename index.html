@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Schackreview">
+<meta name="theme-color" content="#262522">
+<meta name="robots" content="noindex, nofollow">
+<title>Schackreview</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <div class="brand"><img src="pieces/kl.png" alt=""><span>Schackreview</span></div>
+    <button id="btn-fetch" class="btn small">Hämta parti</button>
+  </header>
+
+  <div class="player" id="bar-top"></div>
+  <div class="board-row">
+    <div class="evalbar" id="evalbar"><div class="fill" id="evalfill"></div></div>
+    <div class="board" id="board"></div>
+  </div>
+  <div class="player" id="bar-bottom"></div>
+
+  <main id="panel"></main>
+
+  <nav class="navbar" id="navbar">
+    <button data-nav="first" aria-label="Första draget">⏮</button>
+    <button data-nav="prev" aria-label="Förra draget">‹</button>
+    <button data-nav="play" aria-label="Spela upp">▶</button>
+    <button data-nav="next" aria-label="Nästa drag">›</button>
+    <button data-nav="last" aria-label="Sista draget">⏭</button>
+    <button data-nav="flip" aria-label="Vänd brädet">⇅</button>
+  </nav>
+</div>
+
+<div class="sheet" id="sheet" hidden>
+  <div class="sheet-card">
+    <div class="sheet-head"><b id="sheet-title"></b><button class="x" id="sheet-close" aria-label="Stäng">✕</button></div>
+    <div class="sheet-body" id="sheet-body"></div>
+  </div>
+</div>
+
+<div class="overlay" id="busy" hidden>
+  <div class="busy-card">
+    <img src="pieces/kl.png" alt="" class="spin">
+    <div id="busy-text">Stockfish analyserar…</div>
+    <div class="progress"><div id="busy-bar"></div></div>
+  </div>
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
