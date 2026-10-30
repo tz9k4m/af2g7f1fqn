@@ -179,7 +179,7 @@ export class Trainer {
     rows.push(['○  Spela ett långsamt parti (15|10) och gå igenom det i Partigranskning.', 'li']);
     rows.push(['Varför just det här?', 'h']);
     for (const r of this.D.plan_advice) rows.push([r, r.startsWith('  ') ? 'li' : null]);
-    rows.push(['Pjäser: "cburnett" av Colin M.L. Burnett (CC BY-SA 3.0). Pussel och öppningsnamn: Lichess databas (fri att använda). Motor: Stockfish (GPL).', 'muted']);
+    rows.push(['Pjäser: "maestro" av sadsnake1 (CC BY-NC-SA 4.0). Pussel och öppningsnamn: Lichess databas (fri att använda). Motor: Stockfish (GPL).', 'muted']);
     this.write(rows);
     const first = !dailyDone ? ['Dagens pussel', () => this.openTactics('daily'), 'primary'] : ['Börja med taktik', () => this.openTactics('normal'), 'primary'];
     this.setActions([first, ['Lektioner', () => this.setMode('lessons')], ['Mina misstag', () => this.setMode('mistakes')]]);

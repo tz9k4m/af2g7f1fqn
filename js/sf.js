@@ -1,5 +1,5 @@
 // Stockfish 18 (lite, en tråd) i en Web Worker. Fungerar i Safari på iPhone utan specialinställningar på servern.
-import { MATE } from './engine.js';
+import { MATE, winPct } from './engine.js';
 
 export class Engine {
   constructor(url = 'js/stockfish-18-lite-single.js') {
@@ -65,6 +65,18 @@ export class Engine {
       else if (b.isGameOver()) pos.push({ cp: 0, pv: [], second: null });
       else pos.push(await this.analyse(b.fen(), ms));
       if (progress) progress(k + 1, boards.length);
+    }
+    // Drag som ser ut som inexaktheter eller värre kollas om med längre tid. En kort sökning kan svaja
+    // en halv bonde, och då hamnar gränsfall på fel sida (t.ex. "inexakthet" där chess.com säger "bra").
+    const redo = new Set();
+    for (let i = 0; i + 1 < boards.length; i++) {
+      const sign = boards[i].turn ? 1 : -1;
+      if (winPct(pos[i].cp * sign) - winPct(pos[i + 1].cp * sign) >= 4) { redo.add(i); redo.add(i + 1); }
+    }
+    let done = 0;
+    for (const k of [...redo].sort((a, b) => a - b)) {
+      if (progress) progress(++done, redo.size, true);
+      if (!boards[k].isGameOver()) pos[k] = await this.analyse(boards[k].fen(), ms * 4);
     }
     return pos;
   }

@@ -55,7 +55,7 @@ boardEl.appendChild(svg);
 
 let FLIP = false;
 const xy = s => (FLIP ? [7 - fileOf(s), rankOf(s)] : [fileOf(s), 7 - rankOf(s)]);
-const pieceImg = p => `pieces/${'_pnbrqk'[p.type]}${p.color ? 'l' : 'd'}.png`;
+const pieceImg = p => `pieces/${'_pnbrqk'[p.type]}${p.color ? 'l' : 'd'}.svg`;
 
 function placeSquares() {
   for (let s = 0; s < 64; s++) {
@@ -171,7 +171,7 @@ function layout({ board = true, evalbar = true, strip = true } = {}) {
   c.toggle('nostrip', !strip);
 }
 
-const AVATAR = '<div class="avatar"><img src="pieces/nl.png" alt=""></div>';
+const AVATAR = '<div class="avatar"><img src="pieces/nl.svg" alt=""></div>';
 function bubbleHtml(head, txt, ev = null, tone = '') {
   const pill = ev === null || ev === undefined ? '' : `<span class="ev${ev < 0 ? ' neg' : ''}">${evalText(ev)}</span>`;
   return `<div class="bubble ${tone}">${head ? `<div class="head">${head}${pill}</div>` : ''}${txt ? `<div class="txt">${txt}</div>` : ''}</div>`;
@@ -211,7 +211,7 @@ function renderHome() {
   const h = S.game ? S.game.headers : null;
   const last = h ? `${esc(h.White || 'Vit')} mot ${esc(h.Black || 'Svart')}` : 'Hämta ett parti från chess.com';
   let html = `<button class="hero" id="h-review"><span class="hi" style="background:#81b64c">★</span><div><b>Partigranskning</b><span>${last}</span></div></button>`;
-  html += `<button class="hero" id="h-coach"><span class="hi" style="background:#5d8a32"><img src="pieces/nl.png" alt="" style="width:40px"></span><div><b>Spela med coach</b><span>Ett parti med tips och förklaringar</span></div></button>`;
+  html += `<button class="hero" id="h-coach"><span class="hi" style="background:#5d8a32"><img src="pieces/nl.svg" alt="" style="width:40px"></span><div><b>Spela med coach</b><span>Ett parti med tips och förklaringar</span></div></button>`;
   if (S.game) html += `<button class="hero" id="h-fetch"><span class="hi" style="background:#3c3a37">🔍</span><div><b>Hämta nytt parti</b><span>Välj bland dina senaste partier</span></div></button>`;
   html += '<h2>Träning</h2><div class="tiles">' + HOME_TILES.map(([k, ic, name, sub]) => `<button class="tile" data-m="${k}"><span class="ti">${ic}</span><b>${name}</b><span>${sub}</span></button>`).join('') + '</div>';
   const home = $('home');
@@ -605,7 +605,7 @@ function renderSummary() {
   const won = c => (c ? res === '1-0' : res === '0-1');
   let t = `<div class="sum">${graphSvg()}`;
   t += `<div class="srow players"><div>Spelare</div>${[true, false].map(c => `<div class="who"><span class="nm">${name(c)}${S.me === c ? ' (du)' : ''}</span>`
-    + `<div class="pic${won(c) ? ' win' : ''}"><img src="pieces/k${c ? 'l' : 'd'}.png" alt=""></div></div>`).join('')}</div>`;
+    + `<div class="pic${won(c) ? ' win' : ''}"><img src="pieces/k${c ? 'l' : 'd'}.svg" alt=""></div></div>`).join('')}</div>`;
   t += `<div class="srow boxes"><div>Precision</div><div class="box w">${S.acc.true?.toFixed(1) ?? '–'}</div><div class="box b">${S.acc.false?.toFixed(1) ?? '–'}</div></div>`;
   t += '<div class="sline"></div>';
   for (const cls of ORDER) {
@@ -728,7 +728,7 @@ async function analyse(pgn, quiet = false) {
   let game;
   try { game = loadGame(pgn); } catch (e) { toast(e.message); return; }
   await bookReady;
-  const key = 'pos:' + hash(gameKey(game.boards, game.moves));
+  const key = 'pos:2:' + hash(gameKey(game.boards, game.moves));
   let pos = store.get(key, null);
   if (!pos || pos.length !== game.boards.length) {
     $('busy').hidden = false;
@@ -736,8 +736,8 @@ async function analyse(pgn, quiet = false) {
     $('busy-pct').textContent = '0 %';
     $('busy-bar').style.width = '0%';
     try {
-      pos = await getEngine().analysePositions(game.boards, (k, total) => {
-        $('busy-text').textContent = `Stockfish analyserar drag ${Math.min(k, total - 1)} av ${total - 1}`;
+      pos = await getEngine().analysePositions(game.boards, (k, total, check) => {
+        $('busy-text').textContent = check ? `Dubbelkollar tveksamma drag (${k} av ${total})` : `Stockfish analyserar drag ${Math.min(k, total - 1)} av ${total - 1}`;
         $('busy-pct').textContent = Math.round(k / total * 100) + ' %';
         $('busy-bar').style.width = (k / total * 100) + '%';
       }, MS_PER_POS);
@@ -806,7 +806,7 @@ function capturedHtml(board, you) {
     for (const t of [1, 2, 3, 4, 5]) {
       const k = Math.max(0, left[color][t]);
       pts += k * val[t];
-      for (let i = 0; i < k; i++) h += `<img src="pieces/${'_pnbrqk'[t]}${color ? 'l' : 'd'}.png" alt="">`;
+      for (let i = 0; i < k; i++) h += `<img src="pieces/${'_pnbrqk'[t]}${color ? 'l' : 'd'}.svg" alt="">`;
     }
     return [h, pts];
   };
@@ -872,7 +872,7 @@ async function batchAnalyse(limit, progress) {
     const game = loadGame(g.pgn);
     const h = game.headers;
     progress(k + 1, games.length, `${h.White} mot ${h.Black}`);
-    const key = 'pos:' + hash(gameKey(game.boards, game.moves));
+    const key = 'pos:2:' + hash(gameKey(game.boards, game.moves));
     let pos = store.get(key, null);
     if (!pos || pos.length !== game.boards.length) {
       pos = await getEngine().analysePositions(game.boards, null, MS_PER_POS);

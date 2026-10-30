@@ -430,7 +430,7 @@ export class Coach extends Trainer {
       cells += `<div class="rc" style="color:${c}"><b><span class="icon" style="background:${c}">${sym}</span>${counts[cls] || 0}</b><span>${CLASS_SV[cls][1]}</span></div>`;
     }
     this.host.overlay(`<div class="result"><button class="rx" data-ract="close">✕</button><div class="rtop"><h3>${esc(title)}</h3><p class="rsub">${esc(sub)}</p></div>
-      <div class="rbody"><div class="rcoach"><div class="avatar"><img src="pieces/nl.png" alt=""></div><p class="rline">${esc(line)}</p></div><div class="rcells">${cells}</div>
+      <div class="rbody"><div class="rcoach"><div class="avatar"><img src="pieces/nl.svg" alt=""></div><p class="rline">${esc(line)}</p></div><div class="rcells">${cells}</div>
       <button class="gbtn" data-ract="review">Partigranskning</button><button class="gbtn grey" data-ract="new">Nytt parti</button></div></div>`,
     { review: () => this.toReview(), new: () => this.start_coach(), close: () => this.host.overlay(null) });
   }
@@ -476,7 +476,7 @@ export class Coach extends Trainer {
     const opts = this.choices.map(([label], k) => `<option value="${k}"${k === this.choice ? ' selected' : ''}>${esc(label)}</option>`).join('');
     const col = (k, inner, title) => `<button class="${k}${this.colorPick === k ? ' on' : ''}" data-color="${k}" aria-label="${title}">${inner}</button>`;
     return `<div class="pick"><select id="c-level" aria-label="Nivå">${opts}</select><div class="colors">`
-      + col('w', '<img src="pieces/kl.png" alt="">', 'Spela som vit') + col('r', '?', 'Slumpa färg') + col('b', '<img src="pieces/kd.png" alt="">', 'Spela som svart')
+      + col('w', '<img src="pieces/kl.svg" alt="">', 'Spela som vit') + col('r', '?', 'Slumpa färg') + col('b', '<img src="pieces/kd.svg" alt="">', 'Spela som svart')
       + '</div></div><button class="gbtn full" id="c-play">Spela</button>';
   }
   stripHtml() {

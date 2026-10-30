@@ -1,9 +1,9 @@
 // Sparar appens filer så att den startar utan internet. chess.com hämtas alltid från nätet.
-const VERSION = 'schackreview-4';
+const VERSION = 'schackreview-5';
 const FILES = ['./', 'index.html', 'style.css', 'manifest.json', 'js/app.js', 'js/icons.js', 'js/pc.js', 'js/chess.js', 'js/engine.js',
   'js/analysis.js', 'js/coach.js', 'js/game.js', 'js/sf.js', 'js/store.js', 'js/stats.js', 'js/train.js', 'js/coach_play.js', 'js/coach_lines.js', 'js/stockfish-18-lite-single.js', 'js/stockfish-18-lite-single.wasm',
   'data/book.json', 'data/training.json', 'data/puzzles.json', 'data/themes.json', 'icons/icon-180.png', 'icons/icon-192.png',
-  ...['p', 'n', 'b', 'r', 'q', 'k'].flatMap(t => [`pieces/${t}l.png`, `pieces/${t}d.png`])];
+  ...['p', 'n', 'b', 'r', 'q', 'k'].flatMap(t => [`pieces/${t}l.svg`, `pieces/${t}d.svg`])];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
