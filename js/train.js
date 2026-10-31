@@ -4,7 +4,6 @@ import { Board, Move, PAWN, QUEEN, rankOf } from './pc.js';
 import { cap } from './analysis.js';
 import { CLASS_SV, moveText, whySentences } from './coach.js';
 import { winPct } from './engine.js';
-import { svOpening } from './opening_sv.js';
 import { SKILLS } from './game.js';
 import { store, today, daysFromNow } from './store.js';
 import { STATS_VERSION, loadHistory, loadMistakes, classifyMistake, wrongReason } from './stats.js';
@@ -705,7 +704,7 @@ export class Trainer {
     }
     rows.push(['Öppningar', 'h']);
     const ops = {};
-    for (const r of hist) if (r.opening) (ops[svOpening(r.opening) + '|' + r.color] ||= []).push(r); // äldre partier sparades med engelska namn
+    for (const r of hist) if (r.opening) (ops[r.opening + '|' + r.color] ||= []).push(r);
     for (const [key, list] of Object.entries(ops).sort((a, b) => b[1].length - a[1].length).slice(0, 6)) {
       const [name, col] = key.split('|');
       const rr = list.map(x => x.result);
