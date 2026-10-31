@@ -213,10 +213,35 @@ function fitBoard() {
     const cs = getComputedStyle(el);
     return el.offsetHeight + parseFloat(cs.marginTop) + parseFloat(cs.marginBottom);
   };
+  // Rader i panelen med klassen fit (t.ex. öppningsnamnet under ett coachparti) ska också synas utan scroll.
   const others = ['evalh', 'coachbox', 'captured', 'stripwrap'].reduce((sum, id) => sum + outer($(id)), 0)
+    + [...$('panel').querySelectorAll('.fit')].reduce((sum, el) => sum + outer(el), 0)
     + (app.classList.contains('nostrip') ? 8 : 0);
   const size = Math.floor(Math.min(sc.clientWidth, Math.max(220, sc.clientHeight - others - 4)));
   if (boardEl.style.width !== size + 'px') boardEl.style.width = size + 'px';
+  fitOptional();
+  fitBubbles();
+}
+
+// Panelinnehåll med klassen optional visas bara om det får plats helt, annars syns en halvt avklippt rad.
+function fitOptional() {
+  const limit = $('scroll').getBoundingClientRect().bottom;
+  for (const el of $('panel').querySelectorAll('.optional')) {
+    el.hidden = false;
+    el.hidden = el.getBoundingClientRect().bottom > limit + 1;
+  }
+}
+
+// Coachrutan har fast höjd. Får bubblorna inte plats tas de äldsta bort, och en ensam lång bubbla får mindre text.
+function fitBubbles() {
+  const bb = $('coachbox').querySelector('.bubbles');
+  if (!bb || $('app').classList.contains('noboard')) return;
+  const room = bb.clientHeight;
+  const gap = parseFloat(getComputedStyle(bb).rowGap) || 0;
+  const used = () => [...bb.children].reduce((sum, el) => sum + el.offsetHeight + gap, -gap);
+  while (bb.children.length > 1 && used() > room) bb.firstElementChild.remove();
+  const one = bb.firstElementChild;
+  if (one && used() > room) one.classList.add('tight');
 }
 
 const AVATAR = '<div class="avatar"><img src="pieces/nl.svg" alt=""></div>';
@@ -224,7 +249,7 @@ function bubbleHtml(head, txt, ev = null, tone = '') {
   const pill = ev === null || ev === undefined ? '' : `<span class="ev${ev < 0 ? ' neg' : ''}">${evalText(ev)}</span>`;
   return `<div class="bubble ${tone}">${head ? `<div class="head">${head}${pill}</div>` : ''}${txt ? `<div class="txt">${txt}</div>` : ''}</div>`;
 }
-function setCoach(bubbles) { $('coachbox').innerHTML = `${AVATAR}<div class="bubbles">${bubbles}</div>`; }
+function setCoach(bubbles) { $('coachbox').innerHTML = `${AVATAR}<div class="bubbles">${bubbles}</div>`; fitBubbles(); }
 
 // items: {label, fn, primary, danger, icon, disabled, on} eller {ask: text}
 function setBar(items) {
@@ -626,6 +651,12 @@ boardEl.addEventListener('pointerup', e => {
     if (S.variation) varStep(dx < 0 ? 1 : -1); else go(S.ply + (dx < 0 ? 1 : -1));
   }
 });
+// Avbrutet tryck (t.ex. när iOS tar över gesten): pjäsen går tillbaka till sin ruta.
+boardEl.addEventListener('pointercancel', () => {
+  const t = touch; touch = null;
+  if (!t || !t.drag) return;
+  if (S.tab !== 'review') { if (act()) drawTrain(); } else render();
+});
 const promo = (b, from, to) => {
   const p = b.pieceAt(from);
   const last = p && p.type === PAWN && (rankOf(to) === 7 || rankOf(to) === 0);
@@ -702,7 +733,12 @@ function sheet(title, html) {
   $('sheet-body').innerHTML = html;
   $('sheet').hidden = false;
 }
-const closeSheet = () => { $('sheet').hidden = true; };
+// iOS kan skicka trycket vidare till det som ligger under arket när det stängs, så klick strax efteråt ignoreras.
+let sheetClosed = 0;
+const closeSheet = () => { $('sheet').hidden = true; sheetClosed = Date.now(); };
+document.addEventListener('click', e => {
+  if (Date.now() - sheetClosed < 400 && !e.target.closest('#sheet')) { e.stopPropagation(); e.preventDefault(); }
+}, true);
 $('sheet-close').onclick = closeSheet;
 $('sheet').onclick = e => { if (e.target.id === 'sheet') closeSheet(); };
 
@@ -900,6 +936,7 @@ function trainPanel(keepScroll) {
   const panel = $('panel'), sc = $('scroll');
   const top = sc.scrollTop;
   panel.innerHTML = a.panelHtml();
+  fitBoard();
   const custom = a.barHtml ? a.barHtml() : null;
   if (custom !== null) $('bar').innerHTML = custom;
   else setBar(a.actions.map(([label, fn, style]) => (fn ? { label, fn, primary: style === 'primary', danger: style === 'danger' } : { ask: label })));
@@ -1080,6 +1117,8 @@ placeSquares();
 const refit = () => requestAnimationFrame(fitBoard);
 new ResizeObserver(refit).observe($('scroll'));
 render();
+$('splash').classList.add('gone');
+setTimeout(() => $('splash').remove(), 300);
 const last = store.get('last', null);
 if (last) analyse(last, true);
 if ('serviceWorker' in navigator && window.isSecureContext && location.hostname !== 'localhost') {

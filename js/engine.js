@@ -1,15 +1,17 @@
 // Klassning av varje drag i chess.com-stil, precision och bokdrag. Samma regler som engine.py i datorappen.
 import { Move, KNIGHT, BISHOP, ROOK, QUEEN, PAWN } from './pc.js';
 import { VALUE, hanging } from './analysis.js';
+import { svOpening } from './opening_sv.js';
 
 export const MATE = 10000;
 let BOOK = {};
 
 export async function loadBook(url = 'data/book.json') {
-  try { BOOK = await (await fetch(url)).json(); } catch { BOOK = {}; }
+  try { setBook(await (await fetch(url)).json()); } catch { BOOK = {}; }
   return BOOK;
 }
-export const setBook = b => { BOOK = b; };
+// Namnen visas på svenska överallt, så de översätts en gång när boken laddas.
+export const setBook = b => { BOOK = Object.fromEntries(Object.entries(b).map(([k, v]) => [k, svOpening(v)])); };
 export const openingBook = () => BOOK;
 
 export function winPct(cp) {

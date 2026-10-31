@@ -4,6 +4,7 @@ import { Board, Move, PAWN, QUEEN, rankOf } from './pc.js';
 import { cap } from './analysis.js';
 import { CLASS_SV, moveText, whySentences } from './coach.js';
 import { winPct } from './engine.js';
+import { svOpening } from './opening_sv.js';
 import { SKILLS } from './game.js';
 import { store, today, daysFromNow } from './store.js';
 import { STATS_VERSION, loadHistory, loadMistakes, classifyMistake, wrongReason } from './stats.js';
@@ -542,7 +543,7 @@ export class Trainer {
   // ----- puzzle rush -----
   start_rush() {
     const best = (this.state.rush_best ||= {});
-    this.setBubble('⚡ Puzzle Rush', 'Lös så många pussel du kan. De blir svårare och svårare, och tre fel avslutar omgången.');
+    this.setBubble('⚡ Pussel Rush', 'Lös så många pussel du kan. De blir svårare och svårare, och tre fel avslutar omgången.');
     const rows = [['Regler', 'h'], ['Hitta det bästa draget. Rätt ger en poäng och nästa pussel kommer direkt.', 'li'],
       ['Fel drag ger ett kryss. Tre kryss och omgången är slut.', 'li'],
       ['3 och 5 minuter: mot klockan. Överlevnad: ingen tidsgräns, bara tre kryss.', 'li'],
@@ -704,7 +705,7 @@ export class Trainer {
     }
     rows.push(['Öppningar', 'h']);
     const ops = {};
-    for (const r of hist) if (r.opening) (ops[r.opening + '|' + r.color] ||= []).push(r);
+    for (const r of hist) if (r.opening) (ops[svOpening(r.opening) + '|' + r.color] ||= []).push(r); // äldre partier sparades med engelska namn
     for (const [key, list] of Object.entries(ops).sort((a, b) => b[1].length - a[1].length).slice(0, 6)) {
       const [name, col] = key.split('|');
       const rr = list.map(x => x.result);

@@ -468,9 +468,10 @@ export class Coach extends Trainer {
     return cp === null || cp === undefined ? null : (this.userColor ? cp : -cp);
   }
   panelHtml() {
-    if (this.cg) return this.cg.opening ? `<p class="opening">${esc(this.cg.opening)}</p>` : '';
+    // Raden finns från första draget, även tom, så att brädet inte krymper när öppningen får ett namn.
+    if (this.cg) return `<p class="opening fit">${this.cg.opening ? esc(this.cg.opening) : '&nbsp;'}</p>`;
     // Före partiet: förklaringen ligger under brädet och syns bara på höga skärmar, så att nivå och Spela alltid får plats.
-    return '<div class="pad"><div class="trows">' + this.rows.map(([t, tag]) => (tag === 'h' ? `<h4>${esc(t)}</h4>` : `<p class="${tag || ''}">${esc(t)}</p>`)).join('') + '</div></div>';
+    return '<div class="pad optional"><div class="trows">' + this.rows.map(([t, tag]) => (tag === 'h' ? `<h4>${esc(t)}</h4>` : `<p class="${tag || ''}">${esc(t)}</p>`)).join('') + '</div></div>';
   }
   // Före partiet: nivå i en meny, färg med tre rutor och en stor Spela-knapp.
   barHtml() {
