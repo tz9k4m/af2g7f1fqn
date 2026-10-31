@@ -5,7 +5,7 @@ import { loadGame, summarize, ORDER, PHASES, SKILLS } from './game.js';
 import { shortLine, deepExplain, CLASS_SV, BAD, describeMove } from './coach.js';
 import { Engine } from './sf.js';
 import { store, hash } from './store.js';
-import { recordGame, collectMistakes } from './stats.js';
+import { recordGame, collectMistakes, knownAccounts, activeAccounts } from './stats.js';
 import { Trainer } from './train.js';
 import { Coach } from './coach_play.js';
 import { svgIcon, iconFor } from './icons.js';
@@ -55,7 +55,7 @@ boardEl.appendChild(svg);
 
 let FLIP = false;
 const xy = s => (FLIP ? [7 - fileOf(s), rankOf(s)] : [fileOf(s), 7 - rankOf(s)]);
-const pieceImg = p => `pieces/${'_pnbrqk'[p.type]}${p.color ? 'l' : 'd'}.svg`;
+const pieceImg = p => `pieces/${'_pnbrqk'[p.type]}${p.color ? 'l' : 'd'}.png`;
 
 function placeSquares() {
   for (let s = 0; s < 64; s++) {
@@ -215,7 +215,7 @@ function fitBoard() {
   if (boardEl.style.width !== size + 'px') boardEl.style.width = size + 'px';
 }
 
-const AVATAR = '<div class="avatar"><img src="pieces/nl.svg" alt=""></div>';
+const AVATAR = '<div class="avatar"><img src="pieces/nl.png" alt=""></div>';
 function bubbleHtml(head, txt, ev = null, tone = '') {
   const pill = ev === null || ev === undefined ? '' : `<span class="ev${ev < 0 ? ' neg' : ''}">${evalText(ev)}</span>`;
   return `<div class="bubble ${tone}">${head ? `<div class="head">${head}${pill}</div>` : ''}${txt ? `<div class="txt">${txt}</div>` : ''}</div>`;
@@ -255,13 +255,16 @@ function renderHome() {
   const h = S.game ? S.game.headers : null;
   const last = h ? `${esc(h.White || 'Vit')} mot ${esc(h.Black || 'Svart')}` : 'Hämta ett parti från chess.com';
   let html = `<button class="hero" id="h-review"><span class="hi" style="background:#81b64c">★</span><div><b>Partigranskning</b><span>${last}</span></div></button>`;
-  html += `<button class="hero" id="h-coach"><span class="hi" style="background:#5d8a32"><img src="pieces/nl.svg" alt="" style="width:40px"></span><div><b>Spela med coach</b><span>Ett parti med tips och förklaringar</span></div></button>`;
+  html += `<button class="hero" id="h-coach"><span class="hi" style="background:#5d8a32"><img src="pieces/nl.png" alt="" style="width:40px"></span><div><b>Spela med coach</b><span>Ett parti med tips och förklaringar</span></div></button>`;
   if (S.game) html += `<button class="hero" id="h-fetch"><span class="hi" style="background:#3c3a37">🔍</span><div><b>Hämta nytt parti</b><span>Välj bland dina senaste partier</span></div></button>`;
+  const mine = activeAccounts();
+  html += `<button class="acct" id="h-acct"><span>Träningen anpassas efter</span><b>${mine.length ? esc(mine.join(', ')) : 'inget konto valt'}</b><i>›</i></button>`;
   html += '<h2>Träning</h2><div class="tiles">' + HOME_TILES.map(([k, ic, name, sub]) => `<button class="tile" data-m="${k}"><span class="ti">${ic}</span><b>${name}</b><span>${sub}</span></button>`).join('') + '</div>';
   const home = $('home');
   home.innerHTML = html;
   $('h-review').onclick = () => (S.game ? openTab('review') : openFetch());
   $('h-coach').onclick = () => openTab('coach');
+  $('h-acct').onclick = openAccounts;
   if ($('h-fetch')) $('h-fetch').onclick = openFetch;
   home.querySelectorAll('[data-m]').forEach(e => { e.onclick = () => openTab('train', e.dataset.m); });
   $('bar').innerHTML = '';
@@ -649,7 +652,7 @@ function renderSummary() {
   const won = c => (c ? res === '1-0' : res === '0-1');
   let t = `<div class="sum">${graphSvg()}`;
   t += `<div class="srow players"><div>Spelare</div>${[true, false].map(c => `<div class="who"><span class="nm">${name(c)}${S.me === c ? ' (du)' : ''}</span>`
-    + `<div class="pic${won(c) ? ' win' : ''}"><img src="pieces/k${c ? 'l' : 'd'}.svg" alt=""></div></div>`).join('')}</div>`;
+    + `<div class="pic${won(c) ? ' win' : ''}"><img src="pieces/k${c ? 'l' : 'd'}.png" alt=""></div></div>`).join('')}</div>`;
   t += `<div class="srow boxes"><div>Precision</div><div class="box w">${S.acc.true?.toFixed(1) ?? '–'}</div><div class="box b">${S.acc.false?.toFixed(1) ?? '–'}</div></div>`;
   t += '<div class="sline"></div>';
   for (const cls of ORDER) {
@@ -722,12 +725,64 @@ async function recentGames(name, limit) {
   return games;
 }
 
+// Kontona: alla som appen känner till, och vilka av dem som är dina (träningen bygger bara på dem).
+function setAccounts(known, active) {
+  const uniq = a => [...new Map(a.map(x => [x.toLowerCase(), x])).values()];
+  const k = uniq(known);
+  store.set('names', k);
+  store.set('aktiva', uniq(active).filter(x => k.some(y => y.toLowerCase() === x.toLowerCase())));
+}
+
+function openAccounts() {
+  const draw = () => {
+    const known = knownAccounts(), on = new Set(activeAccounts().map(x => x.toLowerCase()));
+    const rows = known.map((n, k) => `<div class="arow"><label><input type="checkbox" data-k="${k}"${on.has(n.toLowerCase()) ? ' checked' : ''}><span class="sw"></span><b>${esc(n)}</b></label>`
+      + `<button class="ax" data-del="${k}" aria-label="Ta bort">✕</button></div>`).join('');
+    sheet('Mina konton', `
+      <p class="hint">Slå på de konton som är dina. Statistik, Mina misstag, Vanliga fel och lektionsförslagen bygger bara på partier från dem. Andra konton, t.ex. en kompis, kan du fortfarande hämta och granska.</p>
+      <div class="accts">${rows || '<p class="hint" style="padding:12px 14px;margin:0">Inga konton än.</p>'}</div>
+      <div class="row"><input class="field" id="a-new" placeholder="Lägg till konto" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn go" id="a-add">Lägg till</button></div>`);
+    const body = $('sheet-body');
+    body.querySelectorAll('[data-k]').forEach(c => {
+      c.onchange = () => {
+        setAccounts(known, [...body.querySelectorAll('[data-k]')].filter(x => x.checked).map(x => known[+x.dataset.k]));
+        accountsChanged();
+      };
+    });
+    body.querySelectorAll('[data-del]').forEach(b => {
+      b.onclick = () => {
+        const gone = known[+b.dataset.del].toLowerCase();
+        setAccounts(known.filter(x => x.toLowerCase() !== gone), activeAccounts().filter(x => x.toLowerCase() !== gone));
+        accountsChanged(); draw();
+      };
+    });
+    const add = () => {
+      const ns = parseNames($('a-new').value);
+      if (!ns.length) return;
+      setAccounts(known.concat(ns), activeAccounts().concat(ns));
+      accountsChanged(); draw();
+    };
+    $('a-add').onclick = add;
+    $('a-new').onkeydown = e => { if (e.key === 'Enter') add(); };
+  };
+  draw();
+}
+
+// Startsidan och träningen visar något annat när kontona ändras, så de ritas om.
+function accountsChanged() {
+  if (S.tab === 'home') renderHome();
+  else if (S.tab === 'train' && trainer && trainer.mode) trainer.setMode(trainer.mode);
+}
+
 function openFetch() {
-  const names = store.get('names', []).join(', ');
+  const names = store.get('lookup', null) || activeAccounts().join(', ');
+  const chips = knownAccounts().map(n => `<button class="chip" data-n="${esc(n)}">${esc(n)}</button>`).join('');
   sheet('Hämta parti', `
-    <p class="hint">Dina användarnamn på chess.com. Flera konton går bra, skriv dem med komma emellan.</p>
-    <div class="row"><input class="field" id="f-names" value="${esc(names)}" placeholder="t.ex. konto1, konto2" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <p class="hint">Vems partier vill du se? Ditt eget konto eller någon annans. Flera går bra, med komma emellan.</p>
+    <div class="row"><input class="field" id="f-names" value="${esc(names)}" placeholder="användarnamn på chess.com" autocapitalize="off" autocorrect="off" spellcheck="false">
     <button class="btn go" id="f-go">Hämta</button></div>
+    ${chips ? `<div class="chips">${chips}</div>` : ''}
+    <button class="link" id="f-accts">Vilka konton är dina? Träningen anpassas efter dem ›</button>
     <div id="f-err" class="err"></div><div class="games" id="f-list"></div>
     <p class="hint" style="margin-top:18px">Eller klistra in partiets PGN (eller bara dragen):</p>
     <textarea class="field" id="f-pgn" placeholder="1. e4 e5 2. Nf3 …"></textarea>
@@ -735,8 +790,11 @@ function openFetch() {
   const list = $('f-list'), err = $('f-err');
   const load = async () => {
     const ns = parseNames($('f-names').value);
-    if (!ns.length) { err.textContent = 'Skriv ditt användarnamn på chess.com.'; return; }
-    store.set('names', ns);
+    if (!ns.length) { err.textContent = 'Skriv ett användarnamn på chess.com.'; return; }
+    store.set('lookup', ns.join(', '));
+    // Nya namn blir kända konton. Det allra första räknas som ditt; övriga väljer du under Mina konton.
+    const first = !knownAccounts().length;
+    setAccounts(knownAccounts().concat(ns), first ? ns.slice(0, 1) : activeAccounts());
     err.textContent = ''; list.innerHTML = '<p class="hint">Hämtar partier…</p>';
     const all = [], errors = [];
     for (const nm of ns) { try { all.push(...await recentGames(nm, 25)); } catch (e) { errors.push(e.message.includes('fetch') ? 'Kunde inte nå chess.com. Kolla internetanslutningen.' : e.message); } }
@@ -757,6 +815,8 @@ function openFetch() {
     list.querySelectorAll('.game').forEach(el => { el.onclick = () => { closeSheet(); analyse(games[+el.dataset.k].pgn); }; });
   };
   $('f-go').onclick = load;
+  $('f-accts').onclick = openAccounts;
+  $('sheet-body').querySelectorAll('.chip').forEach(c => { c.onclick = () => { $('f-names').value = c.dataset.n; load(); }; });
   $('f-names').onkeydown = e => { if (e.key === 'Enter') load(); };
   $('f-paste').onclick = () => {
     try { loadGame($('f-pgn').value); } catch (e) { err.textContent = e.message; return; }
@@ -794,9 +854,11 @@ async function analyse(pgn, quiet = false) {
     store.set(key, pos);
   }
   const { plies, acc } = classifyAll(game.boards, game.moves, game.headers, pos);
-  const names = store.get('names', []).map(x => x.toLowerCase());
+  // Partiet visas från det kända kontots sida; dina egna konton går före om båda spelarna är kända.
+  const lower = a => a.map(x => x.toLowerCase());
+  const mine = lower(activeAccounts()), known = lower(knownAccounts());
   const w = (game.headers.White || '').toLowerCase(), b = (game.headers.Black || '').toLowerCase();
-  const me = names.includes(w) ? true : names.includes(b) ? false : null;
+  const me = mine.includes(w) ? true : mine.includes(b) ? false : known.includes(w) ? true : known.includes(b) ? false : null;
   overlay(null);
   Object.assign(S, { game, plies, acc, me, sum: summarize(game, plies, acc, me), ply: 0, flipped: me === false,
     view: 'summary', explainOpen: false, step: 'move', showBest: false, variation: null, retry: null, cache: {} });
@@ -850,7 +912,7 @@ function capturedHtml(board, you) {
     for (const t of [1, 2, 3, 4, 5]) {
       const k = Math.max(0, left[color][t]);
       pts += k * val[t];
-      for (let i = 0; i < k; i++) h += `<img src="pieces/${'_pnbrqk'[t]}${color ? 'l' : 'd'}.svg" alt="">`;
+      for (let i = 0; i < k; i++) h += `<img src="pieces/${'_pnbrqk'[t]}${color ? 'l' : 'd'}.png" alt="">`;
     }
     return [h, pts];
   };
@@ -872,7 +934,7 @@ function overlay(html, handlers = {}) {
   boardEl.appendChild(d);
 }
 
-function myName() { return store.get('names', [])[0] || null; }
+function myName() { return activeAccounts()[0] || null; }
 function myRating() {
   const g = S.game;
   if (g && S.me !== null) {
@@ -902,8 +964,8 @@ function celebrate() {
 
 // Hämtar och analyserar dina senaste partier, för Mina misstag och statistiken.
 async function batchAnalyse(limit, progress) {
-  const names = store.get('names', []);
-  if (!names.length) throw new Error('Hämta ett parti under Partigranskning först, så vet jag vilka dina konton är.');
+  const names = activeAccounts();
+  if (!names.length) throw new Error('Välj vilka konton som är dina under Mina konton på startsidan först.');
   const lower = names.map(x => x.toLowerCase());
   const all = [];
   for (const nm of names) { try { all.push(...await recentGames(nm, limit)); } catch { /* nästa konto */ } }

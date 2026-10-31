@@ -8,8 +8,22 @@ import { store, hash } from './store.js';
 
 export const STATS_VERSION = 3;
 
-export const loadHistory = () => store.get('historik', []);
-export const loadMistakes = () => store.get('misstag', []);
+// Konton: 'names' är alla chess.com-konton som appen känner till, 'aktiva' de som är dina. Statistik,
+// Mina misstag, Vanliga fel och lektionsförslagen bygger bara på partier där ett aktivt konto spelade,
+// så att en kompis partier kan granskas utan att blandas in i din träning.
+export const knownAccounts = () => store.get('names', []);
+export const activeAccounts = () => store.get('aktiva', null) ?? knownAccounts();
+const rowPlayer = r => ((r.color === 'w' ? r.white : r.black) || '').toLowerCase();
+function mistakePlayer(m, hist) {
+  if (m.player) return m.player;
+  const row = hist.find(r => m.id.startsWith(r.key.slice(0, 12) + '-')); // äldre misstag saknar konto
+  return row ? rowPlayer(row) : null;
+}
+const allHistory = () => store.get('historik', []);
+const allMistakes = () => store.get('misstag', []);
+const isActive = () => { const a = new Set(activeAccounts().map(x => x.toLowerCase())); return p => p !== null && a.has(p); };
+export const loadHistory = () => { const ok = isActive(); return allHistory().filter(r => ok(rowPlayer(r))); };
+export const loadMistakes = () => { const ok = isActive(), hist = allHistory(); return allMistakes().filter(m => ok(mistakePlayer(m, hist))); };
 
 // Det mest detaljerade öppningsnamnet som partiet passerar i Lichess databas.
 export function openingName(game) {
@@ -82,11 +96,12 @@ export function classifyMistake(m) {
 // Sparar ställningar där du gjorde misstag, så att de kan tränas som pussel. Returnerar antal nya.
 export function collectMistakes(game, plies, me) {
   if (me === null) return 0;
-  const stored = loadMistakes();
+  const stored = allMistakes();
   const ids = new Set(stored.map(m => m.id));
   const key = hash(gameKey(game.boards, game.moves)).slice(0, 12);
   const h = game.headers;
   const opponent = (me ? h.Black : h.White) || '?';
+  const player = ((me ? h.White : h.Black) || '').toLowerCase();
   let added = 0;
   plies.forEach((p, i) => {
     if (game.boards[i].turn !== me || !['mistake', 'blunder', 'miss'].includes(p.cls) || !p.best) return;
@@ -94,7 +109,7 @@ export function collectMistakes(game, plies, me) {
     if (ids.has(id)) return;
     const sign = me ? 1 : -1;
     stored.push({ id, fen: game.boards[i].fen(), best: p.best.uci(), played: game.sans[i], cls: p.cls,
-      cp_best: p.cp_before * sign, opponent, date: (h.Date || '').replace(/\./g, '-'), pv: p.best_pv.slice(0, 6).map(m => m.uci()) });
+      cp_best: p.cp_before * sign, opponent, player, date: (h.Date || '').replace(/\./g, '-'), pv: p.best_pv.slice(0, 6).map(m => m.uci()) });
     added++;
   });
   if (added) store.set('misstag', stored);
@@ -122,7 +137,7 @@ export function recordGame(game, plies, acc, me, summary) {
     acc: acc[me], rating: s.ratings[me], counts: s.counts[me], phases, mistakes, moves: game.moves.length,
     skills: s.skills.map(x => x[1]), tactics: tacticChances(game, plies, me), ended: howItEnded(h),
   };
-  const hist = loadHistory().filter(r => r.key !== key).concat([row]);
+  const hist = allHistory().filter(r => r.key !== key).concat([row]);
   hist.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   store.set('historik', hist);
 }
