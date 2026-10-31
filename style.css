@@ -28,7 +28,8 @@ input, textarea, select { font: inherit; -webkit-user-select: text; user-select:
 .evalh .etxt.w { left: 0; color: #312e2b; } .evalh .etxt.b { right: 0; color: #fff; }
 
 /* Coachen ovanför brädet. Pratbubblorna växer uppåt så att brädet står still. */
-.coachbox { display: flex; align-items: flex-end; gap: 4px; padding: 10px 12px 10px 8px; min-height: 118px; }
+/* Fast höjd: brädet ska inte ändra storlek när bubblan ändras. En lång bubbla växer uppåt över värderingsstapeln. */
+.coachbox { display: flex; align-items: flex-end; gap: 4px; padding: 10px 12px 10px 8px; height: 118px; position: relative; z-index: 3; }
 .avatar { width: 60px; height: 60px; flex: none; border-radius: 14px; background: linear-gradient(160deg, #5d8a32, #2f4a1c);
   display: grid; place-items: center; box-shadow: inset 0 -3px 0 rgba(0,0,0,.25); }
 .avatar img { width: 46px; height: 46px; }
@@ -76,6 +77,7 @@ input, textarea, select { font: inherit; -webkit-user-select: text; user-select:
 @keyframes pop { from { transform: translate(-62%, -38%) scale(.3); opacity: 0; } }
 
 .captured { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px 0; min-height: 0; font-size: 13px; color: var(--muted); }
+.captured { height: 24px; box-sizing: border-box; } /* fast höjd, så att brädet inte krymper vid första slaget */
 .captured:empty { display: none; }
 .captured span { display: flex; align-items: center; }
 .captured img { width: 17px; height: 17px; margin-right: -5px; }
@@ -196,9 +198,9 @@ main#panel:empty { display: none; }
 #app.v-home .stage, #app.v-home main#panel { display: none; }
 #app:not(.v-home) .home { display: none; }
 #app.noeval .evalh { display: none; }
-#app.noeval .coachbox { min-height: 128px; }
+#app.noeval .coachbox { height: 128px; }
 #app.noboard .board, #app.noboard .stripwrap, #app.noboard .evalh, #app.noboard .captured { display: none; }
-#app.noboard .coachbox { min-height: 0; padding-top: 14px; }
+#app.noboard .coachbox { height: auto; padding-top: 14px; }
 #app.nostrip .stripwrap { display: none; }
 #app.nostrip .board { margin-bottom: 8px; }
 
@@ -279,7 +281,7 @@ textarea.field { height: 110px; resize: vertical; font-size: 13px; }
   .top { height: 46px; } .top h1 { font-size: 19px; }
   .hbtn .ic { width: 23px; height: 23px; }
   .evalh { height: 18px; } .evalh .etxt { font-size: 12px; }
-  .coachbox, #app.noeval .coachbox { min-height: 92px; padding: 6px 10px 8px 6px; }
+  .coachbox, #app.noeval .coachbox { height: 96px; padding: 6px 10px 8px 6px; }
   .avatar { width: 48px; height: 48px; border-radius: 12px; } .avatar img { width: 38px; height: 38px; }
   .bubbles { margin-left: 8px; gap: 6px; }
   .bubble { padding: 7px 11px; border-radius: 12px; }
@@ -295,7 +297,7 @@ textarea.field { height: 110px; resize: vertical; font-size: 13px; }
 @media (max-height: 650px) {
   .top { height: 42px; } .top h1 { font-size: 17px; }
   .evalh { height: 16px; margin-top: 2px; }
-  .coachbox, #app.noeval .coachbox { min-height: 70px; padding: 4px 8px 6px 4px; }
+  .coachbox, #app.noeval .coachbox { height: 76px; padding: 4px 8px 6px 4px; }
   .avatar { width: 38px; height: 38px; border-radius: 10px; } .avatar img { width: 30px; height: 30px; }
   .bubble { padding: 6px 10px; } .bubble .head { font-size: 14px; } .bubble .txt { font-size: 13px; }
   .bubbles .bubble:last-child::before { bottom: 10px; }
@@ -331,3 +333,5 @@ textarea.field { height: 110px; resize: vertical; font-size: 13px; }
 .arow b { font-size: 15.5px; }
 .ax { border: 0; background: transparent; color: var(--muted); width: 48px; height: 48px; font-size: 15px; }
 .row .btn { white-space: nowrap; flex: none; }
+
+#app.noboard .coachbox { height: auto; }

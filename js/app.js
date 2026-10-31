@@ -55,7 +55,7 @@ boardEl.appendChild(svg);
 
 let FLIP = false;
 const xy = s => (FLIP ? [7 - fileOf(s), rankOf(s)] : [fileOf(s), 7 - rankOf(s)]);
-const pieceImg = p => `pieces/${'_pnbrqk'[p.type]}${p.color ? 'l' : 'd'}.png`;
+const pieceImg = p => `pieces/${'_pnbrqk'[p.type]}${p.color ? 'l' : 'd'}.svg`;
 
 function placeSquares() {
   for (let s = 0; s < 64; s++) {
@@ -200,7 +200,8 @@ function layout({ board = true, evalbar = true, strip = true } = {}) {
 }
 
 // Brädet blir så stort som får plats: hela bredden om höjden räcker, annars mindre, så att coachen,
-// dragraden och knapparna alltid syns utan att man behöver scrolla, oavsett telefon.
+// dragraden och knapparna alltid syns utan att man behöver scrolla, oavsett telefon. Allt runt brädet har
+// fast höjd, så storleken ändras bara när skärmen eller vyn gör det; annars skalas alla pjäser om och blinkar.
 function fitBoard() {
   const app = $('app'), sc = $('scroll');
   if (app.classList.contains('noboard') || app.classList.contains('v-home')) return;
@@ -215,7 +216,7 @@ function fitBoard() {
   if (boardEl.style.width !== size + 'px') boardEl.style.width = size + 'px';
 }
 
-const AVATAR = '<div class="avatar"><img src="pieces/nl.png" alt=""></div>';
+const AVATAR = '<div class="avatar"><img src="pieces/nl.svg" alt=""></div>';
 function bubbleHtml(head, txt, ev = null, tone = '') {
   const pill = ev === null || ev === undefined ? '' : `<span class="ev${ev < 0 ? ' neg' : ''}">${evalText(ev)}</span>`;
   return `<div class="bubble ${tone}">${head ? `<div class="head">${head}${pill}</div>` : ''}${txt ? `<div class="txt">${txt}</div>` : ''}</div>`;
@@ -255,7 +256,7 @@ function renderHome() {
   const h = S.game ? S.game.headers : null;
   const last = h ? `${esc(h.White || 'Vit')} mot ${esc(h.Black || 'Svart')}` : 'Hämta ett parti från chess.com';
   let html = `<button class="hero" id="h-review"><span class="hi" style="background:#81b64c">★</span><div><b>Partigranskning</b><span>${last}</span></div></button>`;
-  html += `<button class="hero" id="h-coach"><span class="hi" style="background:#5d8a32"><img src="pieces/nl.png" alt="" style="width:40px"></span><div><b>Spela med coach</b><span>Ett parti med tips och förklaringar</span></div></button>`;
+  html += `<button class="hero" id="h-coach"><span class="hi" style="background:#5d8a32"><img src="pieces/nl.svg" alt="" style="width:40px"></span><div><b>Spela med coach</b><span>Ett parti med tips och förklaringar</span></div></button>`;
   if (S.game) html += `<button class="hero" id="h-fetch"><span class="hi" style="background:#3c3a37">🔍</span><div><b>Hämta nytt parti</b><span>Välj bland dina senaste partier</span></div></button>`;
   const mine = activeAccounts();
   html += `<button class="acct" id="h-acct"><span>Träningen anpassas efter</span><b>${mine.length ? esc(mine.join(', ')) : 'inget konto valt'}</b><i>›</i></button>`;
@@ -652,7 +653,7 @@ function renderSummary() {
   const won = c => (c ? res === '1-0' : res === '0-1');
   let t = `<div class="sum">${graphSvg()}`;
   t += `<div class="srow players"><div>Spelare</div>${[true, false].map(c => `<div class="who"><span class="nm">${name(c)}${S.me === c ? ' (du)' : ''}</span>`
-    + `<div class="pic${won(c) ? ' win' : ''}"><img src="pieces/k${c ? 'l' : 'd'}.png" alt=""></div></div>`).join('')}</div>`;
+    + `<div class="pic${won(c) ? ' win' : ''}"><img src="pieces/k${c ? 'l' : 'd'}.svg" alt=""></div></div>`).join('')}</div>`;
   t += `<div class="srow boxes"><div>Precision</div><div class="box w">${S.acc.true?.toFixed(1) ?? '–'}</div><div class="box b">${S.acc.false?.toFixed(1) ?? '–'}</div></div>`;
   t += '<div class="sline"></div>';
   for (const cls of ORDER) {
@@ -887,10 +888,11 @@ function trainPanel(keepScroll) {
   header(title);
   const cp = a.evalCp ? a.evalCp() : null;
   const strip = a.stripHtml ? a.stripHtml() : '';
-  layout({ board: a.boardShown(), evalbar: S.tab === 'coach' && !!a.cg, strip: !!strip });
+  // I ett coachparti syns dragraden från start, även tom, så att brädet inte krymper efter första draget.
+  layout({ board: a.boardShown(), evalbar: S.tab === 'coach' && !!a.cg, strip: !!strip || (S.tab === 'coach' && !!a.cg) });
   if (S.tab === 'coach') setEval(cp);
   setCoach(a.coachHtml());
-  if (strip) setStrip(strip, null);
+  if (strip || S.tab === 'coach') setStrip(strip, null);
   $('captured').innerHTML = S.tab === 'coach' && a.cg ? capturedHtml(a.board, a.userColor) : '';
   const panel = $('panel'), sc = $('scroll');
   const top = sc.scrollTop;
@@ -912,7 +914,7 @@ function capturedHtml(board, you) {
     for (const t of [1, 2, 3, 4, 5]) {
       const k = Math.max(0, left[color][t]);
       pts += k * val[t];
-      for (let i = 0; i < k; i++) h += `<img src="pieces/${'_pnbrqk'[t]}${color ? 'l' : 'd'}.png" alt="">`;
+      for (let i = 0; i < k; i++) h += `<img src="pieces/${'_pnbrqk'[t]}${color ? 'l' : 'd'}.svg" alt="">`;
     }
     return [h, pts];
   };
@@ -1074,8 +1076,6 @@ document.addEventListener('keydown', e => {
 placeSquares();
 const refit = () => requestAnimationFrame(fitBoard);
 new ResizeObserver(refit).observe($('scroll'));
-new ResizeObserver(refit).observe($('coachbox'));
-new ResizeObserver(refit).observe($('stripwrap'));
 render();
 const last = store.get('last', null);
 if (last) analyse(last, true);
