@@ -169,6 +169,23 @@ function layout({ board = true, evalbar = true, strip = true } = {}) {
   c.toggle('noboard', !board);
   c.toggle('noeval', !evalbar);
   c.toggle('nostrip', !strip);
+  fitBoard();
+}
+
+// Brädet blir så stort som får plats: hela bredden om höjden räcker, annars mindre, så att coachen,
+// dragraden och knapparna alltid syns utan att man behöver scrolla, oavsett telefon.
+function fitBoard() {
+  const app = $('app'), sc = $('scroll');
+  if (app.classList.contains('noboard') || app.classList.contains('v-home')) return;
+  const outer = el => {
+    if (!el.offsetHeight) return 0;
+    const cs = getComputedStyle(el);
+    return el.offsetHeight + parseFloat(cs.marginTop) + parseFloat(cs.marginBottom);
+  };
+  const others = ['evalh', 'coachbox', 'captured', 'stripwrap'].reduce((sum, id) => sum + outer($(id)), 0)
+    + (app.classList.contains('nostrip') ? 8 : 0);
+  const size = Math.floor(Math.min(sc.clientWidth, Math.max(220, sc.clientHeight - others - 4)));
+  if (boardEl.style.width !== size + 'px') boardEl.style.width = size + 'px';
 }
 
 const AVATAR = '<div class="avatar"><img src="pieces/nl.svg" alt=""></div>';
@@ -966,6 +983,10 @@ document.addEventListener('keydown', e => {
 });
 
 placeSquares();
+const refit = () => requestAnimationFrame(fitBoard);
+new ResizeObserver(refit).observe($('scroll'));
+new ResizeObserver(refit).observe($('coachbox'));
+new ResizeObserver(refit).observe($('stripwrap'));
 render();
 const last = store.get('last', null);
 if (last) analyse(last, true);

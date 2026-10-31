@@ -44,13 +44,14 @@ input, textarea, select { font: inherit; -webkit-user-select: text; user-select:
 .bubble .ev.neg { background: #403d39; color: #fff; }
 .bubble.good { background: #fff; } .bubble.bad { background: #fff; }
 .bubble.good .head { color: #5c8c2c; } .bubble.bad .head { color: #d9443a; }
-.bubble.typing .txt::after { content: "▍"; opacity: .5; animation: blink .8s steps(2) infinite; }
+.bubble.typing .shown::after { content: "▍"; opacity: .5; animation: blink .8s steps(2) infinite; }
+.bubble .txt .rest { visibility: hidden; }
 @keyframes blink { 50% { opacity: 0; } }
 .icon { width: 24px; height: 24px; border-radius: 50%; display: inline-grid; place-items: center; color: #fff; font-weight: 900; font-size: 12.5px; flex: none;
   box-shadow: 0 1px 0 rgba(0,0,0,.18); }
 
 /* Brädet */
-.board { position: relative; width: 100%; aspect-ratio: 1; touch-action: none; flex: none; }
+.board { position: relative; width: 100%; aspect-ratio: 1; touch-action: none; flex: none; margin: 0 auto; }
 .board .sq { position: absolute; width: 12.5%; height: 12.5%; }
 .board .sq.l { background: var(--light); } .board .sq.d { background: var(--dark); }
 .board .sq { box-shadow: inset 0 0 0 .5px rgba(255,255,255,.07); }
@@ -272,3 +273,41 @@ textarea.field { height: 110px; resize: vertical; font-size: 13px; }
 .result .gbtn { width: 100%; font-size: 20px; }
 .result .gbtn.grey { margin-top: 6px; height: 48px; font-size: 17px; }
 .result .rx { position: absolute; top: 8px; right: 6px; border: 0; background: transparent; color: var(--icon); font-size: 18px; width: 36px; height: 36px; }
+
+/* Lägre skärmar (mindre telefoner, Safari med verktygsfält): allt runt brädet krymper så att brädet får plats. */
+@media (max-height: 780px) {
+  .top { height: 46px; } .top h1 { font-size: 19px; }
+  .hbtn .ic { width: 23px; height: 23px; }
+  .evalh { height: 18px; } .evalh .etxt { font-size: 12px; }
+  .coachbox, #app.noeval .coachbox { min-height: 92px; padding: 6px 10px 8px 6px; }
+  .avatar { width: 48px; height: 48px; border-radius: 12px; } .avatar img { width: 38px; height: 38px; }
+  .bubbles { margin-left: 8px; gap: 6px; }
+  .bubble { padding: 7px 11px; border-radius: 12px; }
+  .bubble .head { font-size: 15px; gap: 6px; } .bubble .txt { font-size: 14px; line-height: 1.3; }
+  .bubble .ev { font-size: 12.5px; padding: 2px 6px; }
+  .icon { width: 21px; height: 21px; font-size: 11px; }
+  .stripwrap { height: 44px; } .strip .mv { font-size: 15.5px; } .strip .mv .icon { width: 18px; height: 18px; font-size: 9px; }
+  .actionbar { padding-top: 6px; padding-bottom: calc(6px + var(--safe-b)); }
+  .abtn { font-size: 11.5px; } .abtn .ic { width: 23px; height: 23px; }
+  .gbtn { height: 50px; font-size: 20px; margin-bottom: 3px; } .gbtn.long { font-size: 16px; }
+  .pick select, .colors button { height: 46px; } .colors button { width: 46px; } .colors button img { width: 32px; }
+}
+@media (max-height: 650px) {
+  .top { height: 42px; } .top h1 { font-size: 17px; }
+  .evalh { height: 16px; margin-top: 2px; }
+  .coachbox, #app.noeval .coachbox { min-height: 70px; padding: 4px 8px 6px 4px; }
+  .avatar { width: 38px; height: 38px; border-radius: 10px; } .avatar img { width: 30px; height: 30px; }
+  .bubble { padding: 6px 10px; } .bubble .head { font-size: 14px; } .bubble .txt { font-size: 13px; }
+  .bubbles .bubble:last-child::before { bottom: 10px; }
+  .stripwrap { height: 38px; } .strip .mv { font-size: 14.5px; padding: 3px 5px; }
+  .abtn { font-size: 10.5px; gap: 1px; } .abtn .ic { width: 21px; height: 21px; }
+  .gbtn { height: 44px; font-size: 18px; } .gbtn.long { font-size: 15px; }
+  .pick select, .colors button { height: 42px; } .colors button { width: 42px; }
+}
+/* Smala telefoner */
+@media (max-width: 360px) {
+  .top { grid-template-columns: 46px 1fr 84px; }
+  .abtn { font-size: 10.5px; } .gbtn { font-size: 18px; }
+  .srow { grid-template-columns: 1fr 76px 44px 76px; } .srow.players, .srow.boxes, .srow.phase { grid-template-columns: 1fr 120px 120px; }
+  .box { width: 76px; } .who .nm { max-width: 92px; }
+}

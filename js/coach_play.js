@@ -458,7 +458,8 @@ export class Coach extends Trainer {
     return this.msgs.map((m, k) => {
       const newest = k === this.msgs.length - 1;
       return `<div class="bubble msg ${m.tone || ''}${newest && !m.typed ? ' typing' : ''}" data-id="${m.id}">${m.head ? `<div class="head"><span class="t">${esc(m.head)}</span></div>` : ''}`
-        + `<div class="txt" data-full="${esc(m.body || '')}">${esc(m.typed || !newest ? m.body || '' : '')}</div></div>`;
+        // Medan texten skrivs fram ligger resten osynlig, så att bubblan redan har sin fulla storlek och brädet står still.
+        + (m.typed || !newest ? `<div class="txt">${esc(m.body || '')}</div></div>` : `<div class="txt" data-full="${esc(m.body || '')}"><span class="shown"></span><span class="rest">${esc(m.body || '')}</span></div></div>`);
     }).join('');
   }
   boardShown() { return true; }
@@ -468,6 +469,7 @@ export class Coach extends Trainer {
   }
   panelHtml() {
     if (this.cg) return this.cg.opening ? `<p class="opening">${esc(this.cg.opening)}</p>` : '';
+    // Före partiet: förklaringen ligger under brädet och syns bara på höga skärmar, så att nivå och Spela alltid får plats.
     return '<div class="pad"><div class="trows">' + this.rows.map(([t, tag]) => (tag === 'h' ? `<h4>${esc(t)}</h4>` : `<p class="${tag || ''}">${esc(t)}</p>`)).join('') + '</div></div>';
   }
   // Före partiet: nivå i en meny, färg med tre rutor och en stor Spela-knapp.
@@ -512,7 +514,8 @@ export class Coach extends Trainer {
     this.typer = setInterval(() => {
       n = Math.min(full.length, n + 3);
       msg.shown = n;
-      el.textContent = full.slice(0, n);
+      el.querySelector('.shown').textContent = full.slice(0, n);
+      el.querySelector('.rest').textContent = full.slice(n);
       if (n >= full.length) { clearInterval(this.typer); msg.typed = true; el.closest('.bubble').classList.remove('typing'); }
     }, 23);
   }
