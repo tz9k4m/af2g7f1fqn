@@ -56,6 +56,9 @@ boardEl.appendChild(svg);
 let FLIP = false;
 const xy = s => (FLIP ? [7 - fileOf(s), rankOf(s)] : [fileOf(s), 7 - rankOf(s)]);
 const pieceImg = p => `pieces/${'_pnbrqk'[p.type]}${p.color ? 'l' : 'd'}.svg`;
+// Alla pjäsbilder laddas och avkodas direkt vid start, så att de finns färdiga när brädet ritas.
+const PRELOAD = [];
+for (const t of 'pnbrqk') for (const c of 'ld') { const im = new Image(); im.src = `pieces/${t}${c}.svg`; im.decode?.().catch(() => {}); PRELOAD.push(im); }
 
 function placeSquares() {
   for (let s = 0; s < 64; s++) {
