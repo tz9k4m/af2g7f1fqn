@@ -238,7 +238,8 @@ function fitBubbles() {
   if (!bb || $('app').classList.contains('noboard')) return;
   const room = bb.clientHeight;
   const gap = parseFloat(getComputedStyle(bb).rowGap) || 0;
-  const used = () => [...bb.children].reduce((sum, el) => sum + el.offsetHeight + gap, -gap);
+  // scrollHeight: en ensam bubbla krymper till rutans höjd, så offsetHeight visar inte att texten inte får plats.
+  const used = () => [...bb.children].reduce((sum, el) => sum + Math.max(el.offsetHeight, el.scrollHeight) + gap, -gap);
   while (bb.children.length > 1 && used() > room) bb.firstElementChild.remove();
   const one = bb.firstElementChild;
   if (one && used() > room) one.classList.add('tight');

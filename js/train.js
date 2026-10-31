@@ -285,14 +285,14 @@ export class Trainer {
       this.setBubble('✓ Rätt! Fortsätt.', 'Hitta nästa drag.', 'good');
       this.locked = true;
       const reply = Move.fromUci(this.pz.moves[this.pz.idx]);
-      this.later(500, () => { this.push(reply); this.pz.idx++; this.locked = false; });
+      this.later(500, () => { this.push(reply); this.pz.idx++; this.locked = false; this.puzzleActions(); });
     } else {
       if (!this.pz.failed) { this.pz.failed = true; this.ratePuzzle(false); this.rememberFailed(); }
       this.puzzleWrong(move);
     }
   }
   puzzleActions() {
-    const items = [['Ledtråd', () => this.puzzleHint()], ['Visa lösning', () => this.puzzleSolution()], ['Nästa pussel', () => this.nextPuzzle()]];
+    const items = [[this.hintLabel(), () => this.puzzleHint()], ['Visa lösning', () => this.puzzleSolution()], ['Nästa pussel', () => this.nextPuzzle()]];
     const n = this.failedIds().length;
     if (n && !this.pattern && !(this.pz.label || '').startsWith('Misslyckat')) items.push([`↻ Misslyckade (${n})`, () => this.openTactics('failed')]);
     this.setActions(items);
@@ -313,14 +313,16 @@ export class Trainer {
     this.push(move);
     this.badges = [{ sq: move.to, kind: 'wrong' }]; this.tints = { [move.to]: 'bad' };
     this.host.redraw();
-    this.pz.wrong = { before, move, pv: null };
-    this.setBubble('✕ Felaktig', `${san} fungerar inte här. Jag tittar på varför …`, 'bad');
+    const w = this.pz.wrong = { before, move, pv: null };
     this.setActions([['Visa följd', () => this.showFollowUp()], ['Försök igen', () => this.puzzleRetry(), 'primary'],
       ['Visa lösning', () => this.puzzleSolution()], ['Nästa pussel', () => this.nextPuzzle()]]);
+    // Förklaringen tar oftast bara ett ögonblick. Mellantexten visas bara om den dröjer, annars blinkar den förbi.
+    this.later(800, () => { if (this.pz.wrong === w && !w.pv) this.setBubble('✕ Felaktig', `${san} fungerar inte här. Jag tittar på varför …`, 'bad'); });
     const after = this.board;
     const info = await this.engine(after, 300);
-    if (!info || !this.pz.wrong) return;
-    this.pz.wrong.pv = info.pv;
+    if (this.pz.wrong !== w) return;
+    if (!info) return this.setBubble('✕ Felaktig', `${san} fungerar inte här.`, 'bad');
+    w.pv = info.pv;
     this.setBubble('✕ Felaktig', wrongReason(before, move, after, info.pv, this.pz.themes), 'bad');
   }
   showFollowUp() {
@@ -351,18 +353,29 @@ export class Trainer {
     this.puzzleActions();
     this.onMove = m => this.puzzleMove(m);
   }
+  // Ledtråden kommer i steg: temat, sedan pjäsen som ska flyttas och sist själva draget. Knappen byter namn till
+  // Visa draget när nästa tryck visar draget.
   puzzleHint() {
-    if (this.pz.idx >= this.pz.moves.length) return;
+    if (this.pz.idx >= this.pz.moves.length || this.locked) return;
+    const m = this.puzzleExpected();
+    if (this.rings.length >= 2) return;
     this.pz.hints++;
     const skip = ['short', 'long', 'veryLong', 'oneMove', 'master', 'advantage', 'crushing', 'middlegame', 'opening', 'endgame'];
     const names = this.pz.themes.filter(t => this.D.themes[t] && !skip.includes(t)).map(t => this.D.themes[t]);
-    if (this.pz.hints === 1 && names.length) this.write([['Ledtråd: ' + names.slice(0, 3).join(', '), 'li']], true);
-    else {
-      this.rings = [this.puzzleExpected().from];
-      this.write([['Ledtråd: flytta pjäsen på den blå rutan.', 'li']], true);
-      this.host.redraw();
+    // Ledtråden står i pratbubblan, där den syns; texten under brädet kan hamna utanför skärmen.
+    if (this.pz.hints === 1 && names.length) this.pzBubble('💡 Ledtråd', 'Tema: ' + names.slice(0, 3).join(', ') + '.');
+    else if (!this.rings.length) {
+      this.rings = [m.from];
+      this.pzBubble('💡 Ledtråd', 'Flytta pjäsen på den blå rutan.');
+    } else {
+      this.rings = [m.from, m.to];
+      this.arrows = [{ from: m.from, to: m.to, kind: 'hint' }];
+      this.pzBubble('💡 Draget', 'Spela det som pilen visar.');
     }
+    this.host.redraw();
+    this.puzzleActions();
   }
+  hintLabel() { return this.rings.length ? 'Visa draget' : 'Ledtråd'; }
   puzzleSolution() {
     if (this.pz.idx >= this.pz.moves.length) return;
     if (this.pz.wrong) {
@@ -757,14 +770,28 @@ export class Trainer {
     const cls = (CLASS_SV[this.mk.cls] || ['ett misstag'])[0];
     this.setBubble('Hitta ett bättre drag', `Från ditt parti mot ${this.mk.opponent} (${this.mk.date}). Här spelade du ${this.mk.played}, och det var ${cls}. ${due.length} kvar att repetera idag.`);
     this.write([['Tänk som i partiet, men noggrannare: vad hotar motståndaren, och har du schack, slag eller hot?', 'muted']]);
-    this.setActions([['Ledtråd', () => this.mistakeHint()], ['Visa lösning', () => this.mistakeResult(false, true)], ['Hoppa över', () => this.setMode('mistakes')]]);
+    this.mistakeActions();
     this.onMove = m => this.mistakeMove(m);
     this.locked = false;
   }
+  mistakeActions() {
+    this.setActions([[this.hintLabel(), () => this.mistakeHint()], ['Visa lösning', () => this.mistakeResult(false, true)], ['Hoppa över', () => this.setMode('mistakes')]]);
+  }
+  // Första trycket visar pjäsen, andra draget. Då räknas ställningen inte som löst på egen hand.
   mistakeHint() {
-    this.rings = [Move.fromUci(this.mk.best).from];
-    this.write([['Ledtråd: flytta pjäsen på den blå rutan.', 'li']], true);
+    if (this.locked || this.rings.length >= 2) return;
+    const best = Move.fromUci(this.mk.best);
+    if (!this.rings.length) {
+      this.rings = [best.from];
+      this.setBubble('💡 Ledtråd', 'Flytta pjäsen på den blå rutan.');
+    } else {
+      this.mkFailed = true;
+      this.rings = [best.from, best.to];
+      this.arrows = [{ from: best.from, to: best.to, kind: 'hint' }];
+      this.setBubble('💡 Draget', 'Spela det som pilen visar.');
+    }
     this.host.redraw();
+    this.mistakeActions();
   }
   async mistakeMove(move) {
     const best = Move.fromUci(this.mk.best);
@@ -773,9 +800,12 @@ export class Trainer {
     this.locked = true;
     const san = this.board.san(move);
     const b = this.board.pushed(move);
-    this.setBubble('Kollar draget …', `Stockfish tittar på ${san}.`);
+    const t = this.token;
+    let done = false;
+    this.later(800, () => { if (!done) this.setBubble('Kollar draget …', `Stockfish tittar på ${san}.`); }); // bara om det dröjer
     const info = await this.engine(b, 400);
-    if (!info) return;
+    done = true;
+    if (!info || this.token !== t) return;
     if (winPct(info.cp) >= winPct(this.mk.cp_best) - 6) { this.push(move); this.mistakeResult(true, false, san); } else {
       this.mkFailed = true;
       this.locked = false;
