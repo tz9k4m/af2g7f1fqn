@@ -106,24 +106,51 @@ function draw(board, opts = {}) {
       d.appendChild(m);
     }
   }
-  pieceLayer.innerHTML = '';
+  // Pjäserna återanvänds mellan ritningarna i stället för att skapas om. Annars laddas bilderna om och
+  // brädet blinkar till på mobilen varje gång ett drag görs. En pjäs som flyttat glider till sin nya ruta.
   const sq = board.squares();
-  for (let s = 0; s < 64; s++) {
-    if (!sq[s]) continue;
-    const el = document.createElement('div');
-    el.className = 'pc';
-    el.dataset.sq = s;
-    el.innerHTML = `<img src="${pieceImg(sq[s])}" alt="" draggable="false">`;
+  const old = new Map([...pieceLayer.children].map(el => [+el.dataset.sq, el]));
+  const used = new Set(), wanted = new Set();
+  for (let s = 0; s < 64; s++) if (sq[s]) wanted.add(s);
+  const animTo = opts.anim ? opts.anim.to : -1;
+  const place = (el, s, fromSq = null) => {
     const [x, y] = xy(s);
     const final = `translate(${x * 100}%, ${y * 100}%)`;
-    if (opts.anim && opts.anim.to === s) {
-      const [fx, fy] = xy(opts.anim.from);
+    el.dataset.sq = s;
+    used.add(el);
+    if (el.classList.contains('drag')) {
+      // Släppt pjäs: hamnar direkt på rutan, utan att glida tillbaka först.
+      el.classList.remove('drag');
+      el.style.transition = 'none';
+      el.style.transform = final;
+      requestAnimationFrame(() => { el.style.transition = ''; });
+    } else if (fromSq !== null) {
+      const [fx, fy] = xy(fromSq);
       el.style.transition = 'none';
       el.style.transform = `translate(${fx * 100}%, ${fy * 100}%)`;
       requestAnimationFrame(() => requestAnimationFrame(() => { el.style.transition = ''; el.style.transform = final; }));
     } else el.style.transform = final;
-    pieceLayer.appendChild(el);
+  };
+  for (const s of wanted) {
+    const el = old.get(s);
+    if (el && s !== animTo && el.dataset.p === pieceImg(sq[s])) place(el, s);
   }
+  for (const s of wanted) {
+    if ([...used].some(e => +e.dataset.sq === s)) continue;
+    const img = pieceImg(sq[s]);
+    let el = s === animTo ? old.get(opts.anim.from) : null;
+    if (el && (used.has(el) || el.dataset.p !== img)) el = null;
+    // Annars en pjäs av samma slag vars ruta blivit tom, t.ex. tornet vid rockad.
+    if (!el) el = [...old.values()].find(e => !used.has(e) && e.dataset.p === img && !wanted.has(+e.dataset.sq)) || null;
+    if (el) { place(el, s); continue; }
+    el = document.createElement('div');
+    el.className = 'pc';
+    el.dataset.p = img;
+    el.innerHTML = `<img src="${img}" alt="" draggable="false">`;
+    pieceLayer.appendChild(el);
+    place(el, s, s === animTo ? opts.anim.from : null);
+  }
+  for (const el of old.values()) if (!used.has(el)) el.remove();
   let html = '';
   for (const a of opts.arrows || []) html += `<polygon points="${arrowPath(a.from, a.to)}" fill="${ARROW[a.kind]}"/>`;
   svg.innerHTML = html;

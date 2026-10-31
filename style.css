@@ -68,7 +68,7 @@ input, textarea, select { font: inherit; -webkit-user-select: text; user-select:
 .board .coord { color: rgba(214,220,230,.6); font-weight: 600; }
 .board .pc { position: absolute; width: 12.5%; height: 12.5%; pointer-events: none; will-change: transform; transition: transform .18s ease-out; z-index: 2; }
 .board .pc.drag { transition: none; z-index: 5; transform-origin: center; }
-.board .pc img { width: 100%; height: 100%; display: block; filter: drop-shadow(0 2px 1.5px rgba(0,0,0,.35)); }
+.board .pc img { width: 100%; height: 100%; display: block; }
 .board svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 4; }
 .board .badge { position: absolute; width: 6.6%; height: 6.6%; border-radius: 50%; z-index: 6; display: grid; place-items: center;
   font-weight: 900; font-size: 13px; color: #fff; box-shadow: 0 0 0 1.5px rgba(255,255,255,.85), 0 1px 3px rgba(0,0,0,.45); transform: translate(-62%, -38%);
