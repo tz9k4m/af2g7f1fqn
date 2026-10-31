@@ -5,7 +5,7 @@ import { loadGame, summarize, ORDER, PHASES, SKILLS } from './game.js';
 import { shortLine, deepExplain, CLASS_SV, BAD, describeMove } from './coach.js';
 import { Engine } from './sf.js';
 import { store, hash } from './store.js';
-import { recordGame, collectMistakes, knownAccounts, activeAccounts } from './stats.js';
+import { recordGame, collectMistakes, knownAccounts, activeAccounts, reviewedKeys } from './stats.js';
 import { Trainer } from './train.js';
 import { Coach } from './coach_play.js';
 import { svgIcon, iconFor } from './icons.js';
@@ -729,14 +729,20 @@ function toast(msg) {
   setTimeout(() => t.remove(), 2600);
 }
 
+let onSheetClose = null;
 function sheet(title, html) {
+  onSheetClose = null;
   $('sheet-title').textContent = title;
   $('sheet-body').innerHTML = html;
   $('sheet').hidden = false;
 }
 // iOS kan skicka trycket vidare till det som ligger under arket när det stängs, så klick strax efteråt ignoreras.
 let sheetClosed = 0;
-const closeSheet = () => { $('sheet').hidden = true; sheetClosed = Date.now(); };
+const closeSheet = () => {
+  $('sheet').hidden = true; sheetClosed = Date.now();
+  const f = onSheetClose; onSheetClose = null;
+  if (f) f();
+};
 document.addEventListener('click', e => {
   if (Date.now() - sheetClosed < 400 && !e.target.closest('#sheet')) { e.stopPropagation(); e.preventDefault(); }
 }, true);
@@ -815,6 +821,17 @@ function accountsChanged() {
   else if (S.tab === 'train' && trainer && trainer.mode) trainer.setMode(trainer.mode);
 }
 
+// En rad i en partilista: resultat, spelarna (dina konton i fetstil), tidskontroll och datum.
+function gameRow(g, k, lower, check = '', note = '') {
+  const [bg, ch] = { win: ['#81b64c', '+'], draw: ['#a7a6a2', '='], loss: ['#fa412d', '−'] }[g.outcome];
+  const d = new Date(g.end * 1000);
+  const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const nm = p => (lower.includes(p.username.toLowerCase()) ? `<b>${esc(p.username)}</b>` : esc(p.username)) + ` (${p.rating})`;
+  const tc = { bullet: 'Bullet', blitz: 'Blixt', rapid: 'Snabb', daily: 'Daglig' }[g.tc] || g.tc;
+  return `<div class="game" data-k="${k}">${check}<span class="res" style="background:${bg}">${ch}</span>
+    <div class="who2"><div>♔︎ ${nm(g.white)}</div><div>♚︎ ${nm(g.black)}</div></div><div class="meta">${note}${tc}<br>${date}</div></div>`;
+}
+
 function openFetch() {
   const names = store.get('lookup', null) || activeAccounts().join(', ');
   const chips = knownAccounts().map(n => `<button class="chip" data-n="${esc(n)}">${esc(n)}</button>`).join('');
@@ -844,15 +861,7 @@ function openFetch() {
     err.textContent = errors.join(' ');
     if (!games.length) { list.innerHTML = '<p class="hint">Inga partier hittades.</p>'; return; }
     const lower = ns.map(x => x.toLowerCase());
-    list.innerHTML = games.map((g, k) => {
-      const [bg, ch] = { win: ['#81b64c', '+'], draw: ['#a7a6a2', '='], loss: ['#fa412d', '−'] }[g.outcome];
-      const d = new Date(g.end * 1000);
-      const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      const nm = p => (lower.includes(p.username.toLowerCase()) ? `<b>${esc(p.username)}</b>` : esc(p.username)) + ` (${p.rating})`;
-      const tc = { bullet: 'Bullet', blitz: 'Blixt', rapid: 'Snabb', daily: 'Daglig' }[g.tc] || g.tc;
-      return `<div class="game" data-k="${k}"><span class="res" style="background:${bg}">${ch}</span>
-        <div class="who2"><div>♔︎ ${nm(g.white)}</div><div>♚︎ ${nm(g.black)}</div></div><div class="meta">${tc}<br>${date}</div></div>`;
-    }).join('');
+    list.innerHTML = games.map((g, k) => gameRow(g, k, lower)).join('');
     list.querySelectorAll('.game').forEach(el => { el.onclick = () => { closeSheet(); analyse(games[+el.dataset.k].pgn); }; });
   };
   $('f-go').onclick = load;
@@ -1005,16 +1014,87 @@ function celebrate() {
   setTimeout(() => box.remove(), 3200);
 }
 
-// Hämtar och analyserar dina senaste partier, för Mina misstag och statistiken.
-async function batchAnalyse(limit, progress) {
+// Dina senaste partier från alla aktiva konton, nyast först.
+async function myRecentGames(limit) {
   const names = activeAccounts();
   if (!names.length) throw new Error('Välj vilka konton som är dina under Mina konton på startsidan först.');
-  const lower = names.map(x => x.toLowerCase());
   const all = [];
   for (const nm of names) { try { all.push(...await recentGames(nm, limit)); } catch { /* nästa konto */ } }
   const seen = new Set();
   const games = all.sort((a, b) => b.end - a.end).filter(g => !seen.has(g.url) && seen.add(g.url)).slice(0, limit);
   if (!games.length) throw new Error('Hittade inga partier på chess.com.');
+  return games;
+}
+
+// Hämtar och analyserar dina senaste partier, för Mina misstag och statistiken.
+async function batchAnalyse(limit, progress) {
+  return analyseGames(await myRecentGames(limit), progress);
+}
+
+// Låter dig bocka för vilka partier som ska granskas; ogranskade är förvalda. Svarar med de valda partierna,
+// eller null om arket stängs.
+function chooseGames() {
+  return new Promise(resolve => {
+    let limit = 0, games = [], picked = new Set(), reviewed = new Set();
+    sheet('Granska flera partier', `<p class="hint">Dina 10 senaste ogranskade partier är förvalda. Bara granskade partier räknas i statistiken och Mina misstag.</p>
+      <div id="g-err" class="err"></div><div class="games" id="g-list"><p class="hint">Hämtar dina partier från chess.com…</p></div>
+      <div class="gpick-foot"><button class="gbtn full" id="g-go" disabled>Välj partier</button></div>`);
+    onSheetClose = () => resolve(null);
+    const list = $('g-list'), go = $('g-go');
+    const lower = activeAccounts().map(x => x.toLowerCase());
+    const update = () => {
+      const n = picked.size;
+      go.disabled = !n;
+      // Ungefär en halv minut per parti på en telefon.
+      go.textContent = n ? `Granska ${n} ${n === 1 ? 'parti' : 'partier'} (≈ ${Math.max(1, Math.round(n / 2))} min)` : 'Välj partier';
+    };
+    const draw = () => {
+      const todo = games.filter(g => !reviewed.has(g.key)).length;
+      list.innerHTML = `<div class="gpick-bar"><span>${todo} av ${games.length} ogranskade</span><button class="link" id="g-all">${picked.size ? 'Avmarkera alla' : 'Markera ogranskade'}</button></div>`
+        + games.map((g, k) => gameRow(g, k, lower, `<span class="gcheck${picked.has(k) ? ' on' : ''}"></span>`,
+          reviewed.has(g.key) ? '<span class="done">✓ Granskad</span><br>' : '')).join('')
+        + '<button class="btn wide" id="g-more" style="margin-top:10px">Visa fler partier</button>';
+      list.querySelectorAll('.game').forEach(el => {
+        el.onclick = () => { const k = +el.dataset.k; if (picked.has(k)) picked.delete(k); else picked.add(k); draw(); };
+      });
+      $('g-all').onclick = () => {
+        if (picked.size) picked.clear(); else games.forEach((g, k) => { if (!reviewed.has(g.key)) picked.add(k); });
+        draw();
+      };
+      $('g-more').onclick = load;
+      update();
+    };
+    const load = async () => {
+      const first = !games.length;
+      limit += 30;
+      if (!first) $('g-more').textContent = 'Hämtar…';
+      let fresh;
+      try { fresh = await myRecentGames(limit); } catch (e) { $('g-err').textContent = e.message; if (first) list.innerHTML = ''; return; }
+      await bookReady;
+      reviewed = reviewedKeys();
+      // Samma parti ska behålla sin bock när listan blir längre.
+      const was = new Set([...picked].map(k => games[k].url));
+      games = fresh;
+      for (const g of games) {
+        try { const gm = loadGame(g.pgn); g.key = hash(gameKey(gm.boards, gm.moves)); } catch { g.key = null; }
+      }
+      picked = new Set();
+      if (first) games.filter(g => !reviewed.has(g.key)).slice(0, 10).forEach(g => picked.add(games.indexOf(g)));
+      else games.forEach((g, k) => { if (was.has(g.url)) picked.add(k); });
+      draw();
+    };
+    go.onclick = () => {
+      const chosen = games.filter((g, k) => picked.has(k));
+      onSheetClose = null;
+      closeSheet();
+      resolve(chosen);
+    };
+    load();
+  });
+}
+
+async function analyseGames(games, progress) {
+  const lower = activeAccounts().map(x => x.toLowerCase());
   await bookReady;
   let added = 0;
   for (const [k, g] of games.entries()) {
@@ -1045,7 +1125,7 @@ function loadData() {
         celebrate,
         analyse: (fen, ms) => getEngine().analyse(fen, ms),
         search: (fen, opts) => getEngine().search(fen, opts),
-        batchAnalyse, myName, myRating, overlay,
+        batchAnalyse, chooseGames, analyseGames, myName, myRating, overlay,
         players: () => {},
         toReview: pgn => analyse(pgn),
       };

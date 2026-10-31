@@ -22,6 +22,8 @@ function mistakePlayer(m, hist) {
 const allHistory = () => store.get('historik', []);
 const allMistakes = () => store.get('misstag', []);
 const isActive = () => { const a = new Set(activeAccounts().map(x => x.toLowerCase())); return p => p !== null && a.has(p); };
+// Nycklarna för alla partier som redan är granskade, från alla konton.
+export const reviewedKeys = () => new Set(allHistory().map(r => r.key));
 export const loadHistory = () => { const ok = isActive(); return allHistory().filter(r => ok(rowPlayer(r))); };
 export const loadMistakes = () => { const ok = isActive(), hist = allHistory(); return allMistakes().filter(m => ok(mistakePlayer(m, hist))); };
 

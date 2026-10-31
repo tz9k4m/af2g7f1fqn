@@ -655,7 +655,7 @@ export class Trainer {
     if (!hist.length) {
       this.setBubble('Ingen statistik än', 'Statistiken byggs av dina analyserade partier. Hämta ett parti i Partigranskning, eller analysera dina senaste partier på en gång.');
       this.write([['Varje parti du analyserar sparas här: precision, misstag, faser och öppningar.', 'muted']]);
-      this.setActions([['Analysera mina 10 senaste partier', () => this.batchAnalyse(), 'primary']]);
+      this.setActions([['Välj partier att granska', () => this.pickAnalyse(), 'primary']]);
       return;
     }
     const n = hist.length;
@@ -742,7 +742,7 @@ export class Trainer {
       const cat = this.D.categories.find(c => c.id === weak[0]);
       actions.push([`Träna: ${cat.name.toLowerCase()}`, () => this.openPattern(cat), 'primary']);
     }
-    actions.push(['Analysera fler partier', () => this.batchAnalyse()]);
+    actions.push(['Granska fler partier', () => this.pickAnalyse(), weak.length || old.length ? null : 'primary']);
     this.setActions(actions);
   }
 
@@ -759,7 +759,7 @@ export class Trainer {
       this.setBubble('Inga misstag att repetera just nu', `Du har ${total} sparade misstag. Nya läggs till automatiskt när du analyserar partier. Du kan också hämta och analysera dina senaste partier på en gång.`);
       this.write([['Så fungerar det', 'h'], ['Varje gång du gör ett misstag, en blunder eller missar en chans sparas ställningen.', 'li'],
         ['Du får sedan hitta det bättre draget. Klarar du det kommer ställningen tillbaka efter 1, 3, 7, 14 och 30 dagar. Missar du kommer den tillbaka direkt.', 'li']]);
-      this.setActions([['Analysera mina 10 senaste partier', () => this.batchAnalyse(), 'primary']]);
+      this.setActions([['Välj partier att granska', () => this.pickAnalyse(), 'primary']]);
       return;
     }
     this.mk = due[0];
@@ -837,6 +837,23 @@ export class Trainer {
     this.write([[`Bästa draget: ${moveText(board, best)}.`, 'h'], ['Varför:', null],
       ...whySentences(board, best, true, pv, 'du').map(s => [s, 'li']), [`I partiet spelade du ${this.mk.played}.`, 'muted']]);
     this.setActions([['Nästa', () => this.setMode('mistakes'), 'primary'], ['Till dagens pass', () => this.setMode('plan')]]);
+  }
+  // Du väljer själv vilka partier som granskas, i ett svep. Sedan visas samma vy igen med de nya partierna.
+  async pickAnalyse() {
+    const back = this.mode, t = this.token;
+    const games = await this.host.chooseGames();
+    if (!games || !games.length || this.token !== t) return;
+    this.setActions([]);
+    try {
+      const added = await this.host.analyseGames(games, (k, total, g) => {
+        if (this.token === t) this.setBubble('Granskar dina partier …', `Parti ${k} av ${total}: ${g}.`);
+      });
+      if (this.token !== t) return;
+      this.setBubble('Klart!', `${games.length} ${games.length === 1 ? 'parti' : 'partier'} granskade, ${added} nya misstag att träna på.`);
+      this.later(1500, () => this.setMode(back));
+    } catch (e) {
+      if (this.token === t) this.setBubble('Det gick inte att granska', String(e.message || e));
+    }
   }
   async batchAnalyse() {
     const t = this.token;
