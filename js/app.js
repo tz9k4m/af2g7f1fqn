@@ -920,6 +920,49 @@ async function analyse(pgn, quiet = false) {
   if (!quiet) $('scroll').scrollTop = 0;
 }
 
+// ---- Delat parti ------------------------------------------------------------------
+// Från Chrome-tillägget eller iPhone-genvägen: #pgn=<PGN> eller #game=<partilänk eller PGN>&u=<konto>.
+
+const gameId = t => (t.match(/chess\.com\/(?:(?:analysis\/)?game\/(?:live\/|daily\/)?|live\/game\/|(?:live|daily)\/?#?g?=?)(\d{5,})/) || t.match(/^\s*(\d{5,})\s*$/) || [])[1];
+
+async function findGame(names, id) {
+  for (const name of names) {
+    const r = await fetch(`https://api.chess.com/pub/player/${encodeURIComponent(name.toLowerCase())}/games/archives`);
+    if (!r.ok) continue;
+    const archives = ((await r.json()).archives || []).slice(-2).reverse();
+    for (const url of archives) {
+      const g = ((await (await fetch(url)).json()).games || []).find(x => x.url && x.url.endsWith('/' + id));
+      if (g && g.pgn) return g.pgn;
+    }
+  }
+  return null;
+}
+
+async function openShared() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  if (!p.has('pgn') && !p.has('game')) return false;
+  history.replaceState(null, '', location.pathname + location.search);
+  const ref = p.get('game') || '', user = (p.get('u') || '').trim();
+  // Öppnad i Safari i stället för hemskärmsappen: då finns inga konton sparade än.
+  if (user && !knownAccounts().length) setAccounts([user], [user]);
+  let pgn = p.get('pgn') || (/\[\w+ "|^\s*1\.\s/.test(ref) ? ref : null);
+  if (!pgn) {
+    const id = gameId(ref);
+    if (!id) { toast('Hittade ingen partilänk i det du delade.'); return false; }
+    const names = [...new Set([user, ...activeAccounts(), ...knownAccounts()].filter(Boolean))];
+    if (!names.length) { toast('Lägg till ditt chess.com-konto först, så hittar jag partiet.'); openAccounts(); return false; }
+    $('busy').hidden = false;
+    $('busy-text').textContent = 'Hämtar partiet från chess.com…';
+    $('busy-pct').textContent = '';
+    $('busy-bar').style.width = '0%';
+    try { pgn = await findGame(names, id); } catch { pgn = null; }
+    $('busy').hidden = true;
+    if (!pgn) { toast('Hittade inte partiet. Det kan pågå fortfarande eller vara spelat av ett annat konto.'); return false; }
+  }
+  await analyse(pgn);
+  return true;
+}
+
 // ---- Träning och coach -------------------------------------------------------------
 
 let trainer = null, coach = null, dataLoading = null;
@@ -1201,7 +1244,8 @@ render();
 $('splash').classList.add('gone');
 setTimeout(() => $('splash').remove(), 300);
 const last = store.get('last', null);
-if (last) analyse(last, true);
+openShared().then(ok => { if (!ok && last && !S.game) analyse(last, true); });
+addEventListener('hashchange', openShared);
 if ('serviceWorker' in navigator && window.isSecureContext && location.hostname !== 'localhost') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
