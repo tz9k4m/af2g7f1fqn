@@ -96,6 +96,9 @@ export function classifyMistake(m) {
 }
 
 // Sparar ställningar där du gjorde misstag, så att de kan tränas som pussel. Returnerar antal nya.
+// Äldre sparade misstag saknar flaggan, men en missad chans är alltid en gåva.
+export const isGift = m => m.gift ?? m.cls === 'miss';
+
 export function collectMistakes(game, plies, me) {
   if (me === null) return 0;
   const stored = allMistakes();
@@ -110,7 +113,9 @@ export function collectMistakes(game, plies, me) {
     const id = `${key}-${i}`;
     if (ids.has(id)) return;
     const sign = me ? 1 : -1;
-    stored.push({ id, fen: game.boards[i].fen(), best: p.best.uci(), played: game.sans[i], cls: p.cls,
+    // En gåva: motståndaren hade just gjort ett misstag och du tog inte vara på det.
+    const gift = p.cls === 'miss' || (i > 0 && ['mistake', 'blunder'].includes(plies[i - 1].cls));
+    stored.push({ id, fen: game.boards[i].fen(), best: p.best.uci(), played: game.sans[i], cls: p.cls, gift, gift_move: i > 0 ? game.sans[i - 1] : '',
       cp_best: p.cp_before * sign, opponent, player, date: (h.Date || '').replace(/\./g, '-'), pv: p.best_pv.slice(0, 6).map(m => m.uci()) });
     added++;
   });

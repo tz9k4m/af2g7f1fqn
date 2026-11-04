@@ -6,12 +6,12 @@ import { CLASS_SV, moveText, whySentences } from './coach.js';
 import { winPct } from './engine.js';
 import { SKILLS } from './game.js';
 import { store, today, daysFromNow } from './store.js';
-import { STATS_VERSION, loadHistory, loadMistakes, classifyMistake, wrongReason } from './stats.js';
+import { STATS_VERSION, loadHistory, loadMistakes, classifyMistake, wrongReason, isGift } from './stats.js';
 
 const INTERVALS = [0, 1, 3, 7, 14, 30, 60]; // dagar till nästa repetition per nivå
 const RUSH_KINDS = { 3: ['3 minuter', 180], 5: ['5 minuter', 300], survival: ['Överlevnad', null] };
 export const MODES = [['plan', 'Dagens pass'], ['lessons', '📘 Lektioner'], ['patterns', 'Vanliga fel'], ['tactics', 'Taktik'],
-  ['rush', '⚡ Rush'], ['mistakes', 'Mina misstag'], ['openings', 'Öppningar'], ['endgames', 'Slutspel'], ['stats', '📈 Statistik']];
+  ['rush', '⚡ Rush'], ['mistakes', 'Mina misstag'], ['gifts', '🎁 Missade gåvor'], ['openings', 'Öppningar'], ['endgames', 'Slutspel'], ['stats', '📈 Statistik']];
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const choice = a => a[Math.floor(Math.random() * a.length)];
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
@@ -162,9 +162,10 @@ export class Trainer {
     const day = this.state.days[today()] || {};
     let week = 0;
     for (let k = 0; k < 7; k++) week += (this.state.days[daysFromNow(-k)] || {}).endgames || 0;
-    const dueM = this.dueMistakes().length;
+    const dueM = this.dueMistakes().length, dueG = this.dueMistakes(true).length;
     const dailyDone = today() in (this.state.daily_done || {});
     const goals = [['Dagens pussel', dailyDone ? 1 : 0, 1, 'pussel'], ['Taktik', day.puzzles || 0, 10, 'pussel'],
+      ['Missade gåvor', day.gifts || 0, Math.min(3, dueG), 'ställningar'],
       ['Mina misstag', day.mistakes || 0, dueM ? Math.min(3, dueM) : 0, 'repetitioner'], ['Öppningar', day.lines || 0, 1, 'linje'],
       ['Slutspel (i veckan)', week, 2, 'övningar']];
     const streak = this.streak();
@@ -182,7 +183,8 @@ export class Trainer {
     rows.push(['Pjäser: "maestro" av sadsnake1 (CC BY-NC-SA 4.0). Pussel och öppningsnamn: Lichess databas (fri att använda). Motor: Stockfish (GPL).', 'muted']);
     this.write(rows);
     const first = !dailyDone ? ['Dagens pussel', () => this.openTactics('daily'), 'primary'] : ['Börja med taktik', () => this.openTactics('normal'), 'primary'];
-    this.setActions([first, ['Lektioner', () => this.setMode('lessons')], ['Mina misstag', () => this.setMode('mistakes')]]);
+    this.setActions([first, ['🎁 Missade gåvor', () => this.setMode('gifts')], ['Mina misstag', () => this.setMode('mistakes')],
+      ['Lektioner', () => this.setMode('lessons')]]);
   }
 
   // ----- taktik -----
@@ -747,10 +749,25 @@ export class Trainer {
   }
 
   // ----- mina misstag -----
-  dueMistakes() {
+  dueMistakes(gifts = false) {
     const prog = this.state.mistakes;
-    return loadMistakes().filter(m => ((prog[m.id] || {}).due || '') <= today())
+    return loadMistakes().filter(m => !gifts || isGift(m)).filter(m => ((prog[m.id] || {}).due || '') <= today())
       .sort((a, b) => ((prog[a.id] || {}).box || 0) - ((prog[b.id] || {}).box || 0) || (a.id < b.id ? -1 : 1));
+  }
+  start_gifts() {
+    const due = this.dueMistakes(true);
+    const total = loadMistakes().filter(isGift).length;
+    if (!due.length) {
+      this.setBubble('Inga missade gåvor att träna just nu', total ? `Du har ${total} sparade. Granska fler partier så hittar appen nya.`
+        : 'Granska dina partier, så letar appen upp lägen där motståndaren gav bort något och du inte tog det.');
+      this.write([['Varför det här?', 'h'],
+        ['I dina senaste partier gjorde motståndarna ungefär fyra stora misstag per parti, men du tog vara på färre än hälften. Det är det snabbaste sättet att vinna fler partier.', 'li'],
+        ['Här får du ställningen direkt efter motståndarens misstag. Hitta draget som tar vara på det.', 'li'],
+        ['Klarar du det kommer ställningen tillbaka efter 1, 3, 7, 14 och 30 dagar. Missar du kommer den tillbaka i morgon.', 'li']]);
+      this.setActions([['Välj partier att granska', () => this.pickAnalyse(), 'primary']]);
+      return;
+    }
+    this.startMistake(due, true);
   }
   start_mistakes() {
     const due = this.dueMistakes();
@@ -762,20 +779,29 @@ export class Trainer {
       this.setActions([['Välj partier att granska', () => this.pickAnalyse(), 'primary']]);
       return;
     }
+    this.startMistake(due);
+  }
+  startMistake(due, gift = false) {
     this.mk = due[0];
     this.mkFailed = false;
     const board = new Board(this.mk.fen);
     this.userColor = board.turn;
     this.setBoard(board);
     const cls = (CLASS_SV[this.mk.cls] || ['ett misstag'])[0];
-    this.setBubble('Hitta ett bättre drag', `Från ditt parti mot ${this.mk.opponent} (${this.mk.date}). Här spelade du ${this.mk.played}, och det var ${cls}. ${due.length} kvar att repetera idag.`);
-    this.write([['Tänk som i partiet, men noggrannare: vad hotar motståndaren, och har du schack, slag eller hot?', 'muted']]);
+    if (gift) {
+      const last = this.mk.gift_move ? `Motståndaren spelade just ${this.mk.gift_move}` : 'Motståndaren gjorde just ett misstag';
+      this.setBubble('🎁 Ta vara på gåvan', `Från ditt parti mot ${this.mk.opponent} (${this.mk.date}). ${last}, och det gav dig en chans. I partiet spelade du ${this.mk.played}. ${due.length} kvar idag.`);
+      this.write([['Vad lämnade motståndaren efter sig? Leta efter oskyddade pjäser, schackar och matt.', 'muted']]);
+    } else {
+      this.setBubble('Hitta ett bättre drag', `Från ditt parti mot ${this.mk.opponent} (${this.mk.date}). Här spelade du ${this.mk.played}, och det var ${cls}. ${due.length} kvar att repetera idag.`);
+      this.write([['Tänk som i partiet, men noggrannare: vad hotar motståndaren, och har du schack, slag eller hot?', 'muted']]);
+    }
     this.mistakeActions();
     this.onMove = m => this.mistakeMove(m);
     this.locked = false;
   }
   mistakeActions() {
-    this.setActions([[this.hintLabel(), () => this.mistakeHint()], ['Visa lösning', () => this.mistakeResult(false, true)], ['Hoppa över', () => this.setMode('mistakes')]]);
+    this.setActions([[this.hintLabel(), () => this.mistakeHint()], ['Visa lösning', () => this.mistakeResult(false, true)], ['Hoppa över', () => this.setMode(this.mode)]]);
   }
   // Första trycket visar pjäsen, andra draget. Då räknas ställningen inte som löst på egen hand.
   mistakeHint() {
@@ -822,7 +848,7 @@ export class Trainer {
     prog.box = clean ? Math.min((prog.box || 0) + 1, INTERVALS.length - 1) : 0;
     const nxt = clean ? INTERVALS[prog.box] : 1;
     prog.due = daysFromNow(nxt);
-    this.count('mistakes');
+    this.count(this.mode);
     if (alt) this.correct(this.last);
     else if (correct) { this.setBoard(board); this.push(best); this.correct(best); } else {
       this.setBoard(board);
@@ -836,7 +862,7 @@ export class Trainer {
     } else this.setBubble(`Lösningen: ${board.san(best)}`, 'Ställningen kommer tillbaka i morgon.');
     this.write([[`Bästa draget: ${moveText(board, best)}.`, 'h'], ['Varför:', null],
       ...whySentences(board, best, true, pv, 'du').map(s => [s, 'li']), [`I partiet spelade du ${this.mk.played}.`, 'muted']]);
-    this.setActions([['Nästa', () => this.setMode('mistakes'), 'primary'], ['Till dagens pass', () => this.setMode('plan')]]);
+    this.setActions([['Nästa', () => this.setMode(this.mode), 'primary'], ['Till dagens pass', () => this.setMode('plan')]]);
   }
   // Du väljer själv vilka partier som granskas, i ett svep. Sedan visas samma vy igen med de nya partierna.
   async pickAnalyse() {
@@ -886,7 +912,8 @@ export class Trainer {
     this.write([['Varför de här öppningarna?', 'h'],
       ['London (vit): samma uppställning nästan oavsett vad svart gör. Löparen ut före e3.', 'li'],
       ['Italienskt (vit): snabb utveckling och tryck mot f7. Lär ut de klassiska principerna.', 'li'],
-      ['Caro-Kann (svart när vit börjar med e4): solid, och den ljusa löparen kommer ut före ...e6.', 'li'],
+      ['e5 (svart när vit börjar med e4): det du själv spelar. Linjerna visar hur du stoppar tidiga damattacker mot f7 och får ut pjäserna.', 'li'],
+      ['Caro-Kann (svart när vit börjar med e4): ett lugnare alternativ till e5.', 'li'],
       ['Slaviskt (svart när vit börjar med d4): stabil mitt utan instängda pjäser.', 'li'],
       ['Lär dig idéerna: om motståndaren spelar något annat vet du ändå vad du vill göra.', 'muted']]);
   }
@@ -955,7 +982,7 @@ export class Trainer {
     p.due = daysFromNow(this.opErrors === 0 ? INTERVALS[p.box] : 1);
     this.count('lines');
     if (this.opErrors === 0) {
-      this.setBubble('✓ Perfekt, hela linjen utan fel!', `Den kommer tillbaka om ${INTERVALS[p.box]} dagar så att du inte glömmer den.`, 'good');
+      this.setBubble('✓ Perfekt, hela linjen utan fel!', `Den kommer tillbaka ${INTERVALS[p.box] === 1 ? 'i morgon' : `om ${INTERVALS[p.box]} dagar`} så att du inte glömmer den.`, 'good');
       this.host.celebrate();
     } else this.setBubble(`Klart, med ${this.opErrors} fel.`, 'Linjen kommer tillbaka i morgon. Spela den igen tills den sitter.');
     const op = this.op;

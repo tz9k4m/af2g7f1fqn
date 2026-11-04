@@ -277,6 +277,7 @@ function setBar(items) {
 const HOME_TILES = [['plan', '📅', 'Dagens pass', 'Ett pass på ungefär 30 minuter'], ['tactics', '🧩', 'Pussel', 'Taktik på din nivå'],
   ['rush', '⚡', 'Pussel Rush', 'Så många du hinner'], ['lessons', '📘', 'Lektioner', 'Lär dig ett mönster i taget'],
   ['patterns', '🎯', 'Vanliga fel', 'Det du missar oftast'], ['mistakes', '🔁', 'Mina misstag', 'Repetera dina egna fel'],
+  ['gifts', '🎁', 'Missade gåvor', 'Vinster du inte såg'],
   ['openings', '📖', 'Öppningar', 'Lär dig dina linjer'], ['endgames', '♔', 'Slutspel', 'Matta och vinn slutspel'],
   ['stats', '📈', 'Statistik', 'Hur det går över tid']];
 
