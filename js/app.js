@@ -890,9 +890,12 @@ async function analyse(pgn, quiet = false) {
     $('busy-text').textContent = 'Startar Stockfish…';
     $('busy-pct').textContent = '0 %';
     $('busy-bar').style.width = '0%';
+    const t0 = Date.now();
     try {
       pos = await getEngine().analysePositions(game.boards, (k, total, check) => {
-        $('busy-text').textContent = check ? `Dubbelkollar tveksamma drag (${k} av ${total})` : `Stockfish analyserar drag ${Math.min(k, total - 1)} av ${total - 1}`;
+        const left = k >= 3 && k < total ? (Date.now() - t0) / k * (total - k) / 1000 : null;
+        const when = left === null ? '' : left < 60 ? ` · ungefär ${Math.round(left)} s kvar` : ` · ungefär ${Math.round(left / 60)} min kvar`;
+        $('busy-text').textContent = check ? `Dubbelkollar tveksamma drag (${k} av ${total})` : `Granskar partiet: drag ${Math.min(k, total - 1)} av ${total - 1}${when}`;
         $('busy-pct').textContent = Math.round(k / total * 100) + ' %';
         $('busy-bar').style.width = (k / total * 100) + '%';
       }, MS_PER_POS);
